@@ -1,0 +1,34 @@
+id: agent-room
+name: Agent Room Backend
+version: 0.1.0
+description: >-
+  Durable model-free shared-room backend for protoAgent: one fixed room,
+  ordered messages, stable client-message deduplication, cursors, membership,
+  a gated local API, and deterministic A2A post/sync/ack/members operations.
+enabled: false
+repository: https://github.com/RomeoRaven/agent-room-plugin
+min_protoagent_version: "0.142.1"
+
+config_section: agent_room
+config:
+  data_dir: ""
+  local_principal: operator
+  peer_principal: ""
+  owner:
+    principal: operator
+    kind: human
+    display_name: Operator
+    role: owner
+    mention_token: "@Operator"
+    host: operator
+    can_post: true
+    can_mention: true
+  members: []
+
+capabilities:
+  network: []
+  filesystem: scoped
+
+emits: []
+subscribes: []
+public_paths: []
