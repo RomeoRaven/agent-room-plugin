@@ -124,3 +124,26 @@ def test_only_configured_posting_members_can_author_messages(tmp_path):
         store.post(room_id="ao", principal="intruder", client_message_id="x-1", body="No")
     with pytest.raises(PermissionError, match="not a posting member"):
         store.post(room_id="ao", principal="observer", client_message_id="o-1", body="No")
+
+
+def test_reopen_reconciles_trusted_member_permissions_and_revocations(tmp_path):
+    path = tmp_path / "agent-room.db"
+    pc1 = {
+        "principal": "pc1",
+        "kind": "host",
+        "display_name": "PC1",
+        "role": "member",
+        "mention_token": "@PC1",
+        "host": "pc1",
+        "can_post": True,
+        "can_mention": False,
+    }
+    observer = {**pc1, "principal": "observer", "display_name": "Observer", "mention_token": "@Observer"}
+    _store(path, members=[pc1, observer])
+
+    reopened = _store(path, members=[{**pc1, "can_post": False}])
+
+    assert {member["principal"] for member in reopened.members(room_id="ao")} == {"dennis", "pc1"}
+    with pytest.raises(PermissionError, match="not a posting member"):
+        reopened.post(room_id="ao", principal="pc1", client_message_id="pc1-1", body="Revoked")
+    assert reopened.is_member(room_id="ao", principal="observer") is False

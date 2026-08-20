@@ -97,39 +97,41 @@ class RoomStore:
                 "INSERT OR IGNORE INTO rooms(id, name, created_at) VALUES (?, ?, ?)",
                 (ROOM_ID, ROOM_NAME, _now()),
             )
+            configured = [owner, *members]
+            principals = [str(member["principal"]) for member in configured]
+            placeholders = ",".join("?" for _ in principals)
             conn.execute(
-                """INSERT OR IGNORE INTO members(
-                       room_id, principal, kind, display_name, role,
-                       mention_token, host, can_post, can_mention
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    ROOM_ID,
-                    str(owner["principal"]),
-                    str(owner.get("kind") or "human"),
-                    str(owner["display_name"]),
-                    str(owner.get("role") or "owner"),
-                    str(owner["mention_token"]),
-                    str(owner.get("host") or "operator"),
-                    int(bool(owner.get("can_post", True))),
-                    int(bool(owner.get("can_mention", True))),
-                ),
+                f"DELETE FROM members WHERE room_id=? AND principal NOT IN ({placeholders})",
+                (ROOM_ID, *principals),
             )
-            for member in members:
+            conn.execute(
+                f"DELETE FROM cursors WHERE room_id=? AND principal NOT IN ({placeholders})",
+                (ROOM_ID, *principals),
+            )
+            for member in configured:
                 conn.execute(
-                    """INSERT OR IGNORE INTO members(
+                    """INSERT INTO members(
                            room_id, principal, kind, display_name, role,
                            mention_token, host, can_post, can_mention
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(room_id, principal) DO UPDATE SET
+                         kind=excluded.kind,
+                         display_name=excluded.display_name,
+                         role=excluded.role,
+                         mention_token=excluded.mention_token,
+                         host=excluded.host,
+                         can_post=excluded.can_post,
+                         can_mention=excluded.can_mention""",
                     (
                         ROOM_ID,
                         str(member["principal"]),
-                        str(member["kind"]),
+                        str(member.get("kind") or "human"),
                         str(member["display_name"]),
                         str(member.get("role") or "member"),
                         str(member["mention_token"]),
-                        str(member["host"]),
-                        int(bool(member.get("can_post", False))),
-                        int(bool(member.get("can_mention", False))),
+                        str(member.get("host") or "operator"),
+                        int(bool(member.get("can_post", member is owner))),
+                        int(bool(member.get("can_mention", member is owner))),
                     ),
                 )
 

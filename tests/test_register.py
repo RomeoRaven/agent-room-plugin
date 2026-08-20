@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from types import ModuleType
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -87,3 +90,21 @@ def test_register_without_peer_keeps_local_api_but_advertises_no_a2a_skill(tmp_p
     assert len(registry.routers) == 1
     assert registry.skills == []
     assert registry.handlers == {}
+
+
+def test_data_dir_does_not_fallback_when_host_path_resolution_fails(monkeypatch):
+    plugin = _load_plugin()
+    infra = ModuleType("infra")
+    infra.__path__ = []
+    paths = ModuleType("infra.paths")
+
+    def broken_paths():
+        raise RuntimeError("host path resolution failed")
+
+    paths.instance_paths = broken_paths
+    monkeypatch.setitem(sys.modules, "infra", infra)
+    monkeypatch.setitem(sys.modules, "infra.paths", paths)
+    monkeypatch.delenv("AGENT_ROOM_DIR", raising=False)
+
+    with pytest.raises(RuntimeError, match="host path resolution failed"):
+        plugin._data_dir({})

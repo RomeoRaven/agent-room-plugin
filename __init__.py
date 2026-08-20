@@ -25,7 +25,7 @@ def _data_dir(config: dict) -> Path:
         from infra.paths import instance_paths
 
         return instance_paths().store("agent-room")
-    except Exception:
+    except ImportError:
         base = Path(os.environ.get("PROTOAGENT_HOME") or "~/.protoagent/default").expanduser()
         return base / "agent-room"
 
