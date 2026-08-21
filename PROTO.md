@@ -13,7 +13,7 @@ Version 0.2.x owns one fixed `ao` room and four model-free operations:
 
 The plugin exposes a bearer-gated local router at `/api/plugins/agent-room` and, only when `peer_principal` is configured as a member, advertises/handles deterministic A2A skill `agent-room-v1`.
 
-When `dispatch_targets` maps a Room member principal to an existing protoAgent named delegate, exact member tokens create durable mention records. The worker invokes only through `PluginHost.invoke_delegate`, keys ACP conversation state by Room/thread, persists returned reply text before posting, and never exposes the local delegate route over HTTP/A2A.
+When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. Multiple configured members share one worker but are addressed independently in this slice. The worker invokes only through `PluginHost.invoke_delegate`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP/A2A.
 
 ## Architecture
 
@@ -34,7 +34,7 @@ When `dispatch_targets` maps a Room member principal to an existing protoAgent n
 - Never trust `principal`, `author`, `source`, or similar identity fields from request payloads.
 - Only the canonical S1 owner assigns message sequence numbers.
 - Preserve stable client-message deduplication; conflicting content under one id must fail.
-- No dynamic rooms, cross-host routing, multi/agent-to-agent mention, attachments, reactions, search, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
+- No dynamic rooms, cross-host routing, multi-target-in-one-message or agent-to-agent mention, attachments, reactions, search, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
 - Installation-specific principal/delegate names belong only in local config; public defaults remain empty.
 - `@all` is forbidden. Unmentioned text is silent. One source/target pair creates at most one useful turn/reply.
 - A restart during a possible delegate invocation becomes `ambiguous` and is never automatically replayed; cached `reply_ready` text may be posted idempotently without another invocation.

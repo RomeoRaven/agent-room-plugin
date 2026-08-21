@@ -27,6 +27,16 @@ HERMES = {
     "can_post": True,
     "can_mention": False,
 }
+HEADROOM = {
+    "principal": "headroom",
+    "kind": "agent",
+    "display_name": "Headroom",
+    "role": "member",
+    "mention_token": "@Headroom",
+    "host": "s1",
+    "can_post": True,
+    "can_mention": False,
+}
 
 
 def test_configured_mention_is_durable_and_retry_idempotent(tmp_path):
@@ -114,6 +124,59 @@ async def test_worker_invokes_once_and_posts_one_same_thread_reply(tmp_path):
     mention = store.mention(source["mentions"][0]["id"])
     assert mention["status"] == "completed"
     assert mention["reply_message_id"] == reply["id"]
+
+
+@pytest.mark.asyncio
+async def test_two_configured_targets_wake_independently_with_distinct_routes_and_attribution(tmp_path):
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES, HEADROOM])
+    operations = RoomOperations(
+        store,
+        dispatch_targets={
+            "hermes": {"delegate": "hermes_s1"},
+            "headroom": {"delegate": "headroom_s1"},
+        },
+    )
+    hermes_source = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "wake-hermes", "body": "Status @Hermes"},
+        principal="dennis",
+    )["result"]
+    headroom_source = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "wake-headroom", "body": "Status @Headroom"},
+        principal="dennis",
+    )["result"]
+    calls = []
+
+    async def invoke(delegate_name: str, prompt: str, conversation_key: str) -> str:
+        calls.append((delegate_name, prompt, conversation_key))
+        return f"reply from {delegate_name}"
+
+    worker = MentionWorker(store, invoke_delegate=invoke)
+    assert await worker.run_once() is True
+    assert await worker.run_once() is True
+    assert await worker.run_once() is False
+
+    assert [(call[0], call[2]) for call in calls] == [
+        ("hermes_s1", f"ao:{hermes_source['message']['thread_id']}"),
+        ("headroom_s1", f"ao:{headroom_source['message']['thread_id']}"),
+    ]
+    messages = store.sync(room_id="ao", after=0, limit=10)["messages"]
+    replies = [message for message in messages if message["author_kind"] == "agent"]
+    assert [(reply["author_principal"], reply["body"]) for reply in replies] == [
+        ("hermes", "reply from hermes_s1"),
+        ("headroom", "reply from headroom_s1"),
+    ]
+    assert replies[0]["thread_id"] == hermes_source["message"]["thread_id"]
+    assert replies[0]["reply_to_message_id"] == hermes_source["message"]["id"]
+    assert replies[1]["thread_id"] == headroom_source["message"]["thread_id"]
+    assert replies[1]["reply_to_message_id"] == headroom_source["message"]["id"]
+
+    mentions = store.mentions_for_messages([hermes_source["message"]["id"], headroom_source["message"]["id"]])
+    assert [(mention["target_principal"], mention["delegate_name"], mention["status"]) for mention in mentions] == [
+        ("hermes", "hermes_s1", "completed"),
+        ("headroom", "headroom_s1", "completed"),
+    ]
 
 
 @pytest.mark.asyncio

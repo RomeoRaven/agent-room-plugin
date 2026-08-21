@@ -128,6 +128,44 @@ def test_register_configured_dispatch_target_adds_one_worker_surface(tmp_path):
     assert callable(registry.surfaces[0]["stop"])
 
 
+def test_register_accepts_multiple_configured_members_behind_one_worker_surface(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path, peer=False)
+    config["members"].extend(
+        [
+            {
+                "principal": "hermes",
+                "kind": "agent",
+                "display_name": "Hermes",
+                "role": "member",
+                "mention_token": "@Hermes",
+                "host": "s1",
+                "can_post": True,
+                "can_mention": False,
+            },
+            {
+                "principal": "headroom",
+                "kind": "agent",
+                "display_name": "Headroom",
+                "role": "member",
+                "mention_token": "@Headroom",
+                "host": "s1",
+                "can_post": True,
+                "can_mention": False,
+            },
+        ]
+    )
+    config["dispatch_targets"] = {
+        "hermes": {"delegate": "hermes_s1"},
+        "headroom": {"delegate": "headroom_s1"},
+    }
+    registry = FakeRegistry(config)
+
+    plugin.register(registry)
+
+    assert [surface["name"] for surface in registry.surfaces] == ["mention-delivery"]
+
+
 def test_data_dir_does_not_fallback_when_host_path_resolution_fails(monkeypatch):
     plugin = _load_plugin()
     infra = ModuleType("infra")
