@@ -25,13 +25,15 @@ Dispatch is generic and opt-in. Installation-specific names stay in local config
 ```yaml
 agent_room:
   dispatch_targets:
-    hermes:
-      delegate: hermes_s1
+    assistant:
+      delegate: assistant_local
+    reviewer:
+      delegate: reviewer_local
 ```
 
-The dispatch principal must also be a configured Room member, and the named delegate must already exist in protoAgent. Plain text wakes nobody. `@all` and multiple automatic targets are rejected in this slice. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
+Each dispatch principal must also be a configured Room member, and each named delegate must already exist in protoAgent. Multiple targets may be configured behind the same worker and addressed independently; delegate identity plus the Room/thread conversation key keeps their ACP sessions separate. Plain text wakes nobody. `@all` and multiple targets in one message are rejected in this slice. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
 
-Not included yet: cross-host routing, multiple or agent-to-agent mentions, PC1 offline outbox, attachments, dynamic rooms, reactions, search, mutation, or general execution.
+Not included yet: multiple targets in one message, agent-to-agent mentions, cross-host routing, PC1 offline outbox, attachments, dynamic rooms, reactions, search, mutation, or general execution.
 
 ## Development
 
