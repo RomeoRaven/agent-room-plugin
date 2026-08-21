@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 
 try:  # package load under protoAgent
     from .store import RoomStore
@@ -20,6 +21,11 @@ _PUBLIC_MENTION_FIELDS = (
     "target_principal",
     "token",
     "status",
+    "parent_mention_id",
+    "origin_message_id",
+    "origin_chain",
+    "hop_count",
+    "position",
     "reply_message_id",
     "error",
     "created_at",
@@ -46,41 +52,115 @@ def _optional_string(payload: dict, key: str, *, max_length: int) -> str | None:
 
 
 class RoomOperations:
-    def __init__(self, store: RoomStore, *, dispatch_targets: dict[str, dict] | None = None):
+    def __init__(
+        self,
+        store: RoomStore,
+        *,
+        dispatch_targets: dict[str, dict] | None = None,
+        mention_policy: dict | None = None,
+    ):
         self.store = store
         self.dispatch_targets = {
             str(principal).casefold(): dict(target)
             for principal, target in (dispatch_targets or {}).items()
             if isinstance(target, dict) and str(target.get("delegate") or "").strip()
         }
+        policy = mention_policy or {}
+        self.max_agent_hops = max(0, min(int(policy.get("max_agent_hops", 1)), 10))
+        self.max_mentions_per_target = max(1, min(int(policy.get("max_mentions_per_target", 5)), 100))
+        self.rate_window_seconds = max(1, min(int(policy.get("rate_window_seconds", 60)), 86400))
 
     @staticmethod
     def _public_mentions(mentions: list[dict]) -> list[dict]:
         return [{key: mention[key] for key in _PUBLIC_MENTION_FIELDS} for mention in mentions]
 
-    def _resolve_mentions(self, *, room_id: str, principal: str, body: str) -> list[dict]:
+    def resolve_mentions(
+        self,
+        *,
+        room_id: str,
+        principal: str,
+        body: str,
+        parent_mention: dict | None = None,
+    ) -> list[dict]:
         if re.search(r"(?<!\w)@all(?!\w)", body, flags=re.IGNORECASE):
             raise ValueError("@all broadcast is not supported")
         members = self.store.members(room_id=room_id)
         source = next((member for member in members if member["principal"] == principal), None)
-        resolved = []
+        candidates = []
+        parent_chain = [str(item) for item in (parent_mention or {}).get("origin_chain", [])]
+        parent_hop = int((parent_mention or {}).get("hop_count") or 0)
+        cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.rate_window_seconds)).isoformat()
         for member in members:
             target = self.dispatch_targets.get(str(member["principal"]).casefold())
             if target is None:
                 continue
             token = str(member["mention_token"])
-            if re.search(rf"(?<!\w){re.escape(token)}(?!\w)", body, flags=re.IGNORECASE):
-                resolved.append(
+            for match in re.finditer(rf"(?<!\w){re.escape(token)}(?!\w)", body, flags=re.IGNORECASE):
+                candidates.append(
                     {
-                        "target_principal": member["principal"],
+                        "target_principal": str(member["principal"]),
                         "token": token,
                         "delegate_name": str(target["delegate"]).strip(),
+                        "position": match.start(),
+                        "_end": match.end(),
                     }
                 )
-        if resolved and (source is None or not source["can_mention"]):
+        if candidates and (source is None or not source["can_mention"]):
             raise PermissionError(f"principal {principal!r} may not mention room agents")
-        if len(resolved) > 1:
-            raise ValueError("multiple agent mentions are deferred")
+
+        selected = []
+        for candidate in sorted(
+            candidates,
+            key=lambda mention: (
+                mention["position"],
+                -(mention["_end"] - mention["position"]),
+                mention["target_principal"],
+            ),
+        ):
+            if any(
+                candidate["position"] < existing["_end"] and candidate["_end"] > existing["position"]
+                for existing in selected
+            ):
+                continue
+            selected.append(candidate)
+        selected.sort(key=lambda mention: (mention["position"], mention["target_principal"]))
+        unique_targets = []
+        seen_targets = set()
+        for candidate in selected:
+            if candidate["target_principal"] in seen_targets:
+                continue
+            seen_targets.add(candidate["target_principal"])
+            unique_targets.append(candidate)
+
+        resolved = []
+        for candidate in unique_targets:
+            target_principal = candidate["target_principal"]
+            hop_count = parent_hop + 1 if parent_mention else 0
+            origin_chain = [*parent_chain, target_principal] if parent_mention else [target_principal]
+            status = "pending"
+            error = None
+            if parent_mention and target_principal in parent_chain:
+                status = "blocked"
+                error = "mention cycle blocked"
+            elif parent_mention and hop_count > self.max_agent_hops:
+                status = "blocked"
+                error = "mention hop limit reached"
+            resolved.append(
+                {
+                    "target_principal": target_principal,
+                    "token": candidate["token"],
+                    "delegate_name": candidate["delegate_name"],
+                    "position": candidate["position"],
+                    "status": status,
+                    "error": error,
+                    "parent_mention_id": (parent_mention or {}).get("id"),
+                    "origin_message_id": (parent_mention or {}).get("origin_message_id"),
+                    "origin_chain": origin_chain,
+                    "hop_count": hop_count,
+                    "rate_limit": self.max_mentions_per_target,
+                    "rate_since": cutoff,
+                }
+            )
         return resolved
 
     def execute(self, operation: str, payload: dict, *, principal: str) -> dict:
@@ -107,7 +187,7 @@ class RoomOperations:
                 body=body,
                 thread_id=_optional_string(payload, "thread_id", max_length=200),
                 reply_to_message_id=_optional_string(payload, "reply_to_message_id", max_length=200),
-                mentions=self._resolve_mentions(room_id=room_id, principal=bound_principal, body=body),
+                mentions=self.resolve_mentions(room_id=room_id, principal=bound_principal, body=body),
             )
             result.setdefault("mentions", [])
             result["mentions"] = self._public_mentions(result["mentions"])

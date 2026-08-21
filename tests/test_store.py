@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+
 import pytest
 
 from store import RoomConflict, RoomStore
@@ -166,3 +168,57 @@ def test_duplicate_configured_principal_or_mention_token_fails_closed(tmp_path):
     }
     with pytest.raises(ValueError, match="duplicate configured mention token"):
         _store(tmp_path / "mention.db", members=[first, {**first, "principal": "two", "display_name": "Two"}])
+
+
+def test_reopen_migrates_v02_mentions_with_origin_defaults(tmp_path):
+    path = tmp_path / "legacy.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE messages (
+                id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id), sequence INTEGER NOT NULL,
+                client_principal TEXT NOT NULL, client_message_id TEXT NOT NULL, author_principal TEXT NOT NULL,
+                author_kind TEXT NOT NULL, body TEXT NOT NULL, thread_id TEXT NOT NULL,
+                reply_to_message_id TEXT, created_at TEXT NOT NULL,
+                UNIQUE(room_id, sequence), UNIQUE(room_id, client_principal, client_message_id)
+            );
+            CREATE TABLE members (
+                room_id TEXT NOT NULL REFERENCES rooms(id), principal TEXT NOT NULL, kind TEXT NOT NULL,
+                display_name TEXT NOT NULL, role TEXT NOT NULL, mention_token TEXT NOT NULL, host TEXT NOT NULL,
+                can_post INTEGER NOT NULL, can_mention INTEGER NOT NULL,
+                PRIMARY KEY(room_id, principal), UNIQUE(room_id, mention_token)
+            );
+            CREATE TABLE mentions (
+                id TEXT PRIMARY KEY, room_id TEXT NOT NULL REFERENCES rooms(id),
+                source_message_id TEXT NOT NULL REFERENCES messages(id), target_principal TEXT NOT NULL,
+                token TEXT NOT NULL, delegate_name TEXT NOT NULL, status TEXT NOT NULL,
+                reply_body TEXT, reply_message_id TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                UNIQUE(source_message_id, target_principal)
+            );
+            CREATE TABLE cursors (
+                room_id TEXT NOT NULL REFERENCES rooms(id), principal TEXT NOT NULL,
+                last_sequence INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(room_id, principal)
+            );
+            INSERT INTO rooms VALUES ('ao', 'Agent Organization', '2026-08-21T00:00:00+00:00');
+            INSERT INTO messages VALUES (
+                'message-1', 'ao', 1, 'dennis', 'legacy-1', 'dennis', 'human',
+                'Hello @Hermes', 'message-1', NULL, '2026-08-21T00:00:01+00:00'
+            );
+            INSERT INTO members VALUES ('ao', 'dennis', 'human', 'Dennis', 'owner', '@Dennis', 'operator', 1, 1);
+            INSERT INTO mentions VALUES (
+                'mention-1', 'ao', 'message-1', 'hermes', '@Hermes', 'hermes_s1', 'completed',
+                'reply', 'reply-1', NULL, '2026-08-21T00:00:02+00:00', '2026-08-21T00:00:03+00:00'
+            );
+            """
+        )
+
+    reopened = _store(path)
+    mention = reopened.mention("mention-1")
+
+    assert mention["origin_message_id"] == "message-1"
+    assert mention["parent_mention_id"] is None
+    assert mention["origin_chain"] == ["hermes"]
+    assert mention["hop_count"] == 0
+    assert mention["position"] == 0
+    assert mention["status"] == "completed"

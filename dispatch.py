@@ -22,9 +22,11 @@ class MentionWorker:
         store: RoomStore,
         *,
         invoke_delegate: Callable[[str, str, str], Awaitable[str]],
+        resolve_mentions: Callable[..., list[dict]] | None = None,
     ):
         self.store = store
         self.invoke_delegate = invoke_delegate
+        self.resolve_mentions = resolve_mentions
 
     def _prompt(self, work: dict) -> str:
         context = self.store.thread_context(
@@ -67,6 +69,16 @@ class MentionWorker:
                 return True
 
         try:
+            mentions = (
+                self.resolve_mentions(
+                    room_id=work["room_id"],
+                    principal=work["target_principal"],
+                    body=work["reply_body"],
+                    parent_mention=work,
+                )
+                if self.resolve_mentions
+                else None
+            )
             reply = self.store.post(
                 room_id=work["room_id"],
                 principal=work["target_principal"],
@@ -75,6 +87,7 @@ class MentionWorker:
                 author_kind="agent",
                 thread_id=work["source_thread_id"],
                 reply_to_message_id=work["source_message_id"],
+                mentions=mentions,
             )
             self.store.complete_mention(work["id"], reply["message"]["id"])
         except Exception:

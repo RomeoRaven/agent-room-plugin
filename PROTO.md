@@ -4,7 +4,7 @@ Read this before changing anything. This repository is the durable backend owner
 
 ## Current accepted scope
 
-Version 0.2.x owns one fixed `ao` room and four model-free operations:
+Version 0.3.x owns one fixed `ao` room and four model-free operations:
 
 - `room.post` — canonically order one message and deduplicate retries by bound principal + stable client message id;
 - `room.sync` — return a bounded ascending page and sanitized mention state after a canonical sequence;
@@ -13,7 +13,9 @@ Version 0.2.x owns one fixed `ao` room and four model-free operations:
 
 The plugin exposes a bearer-gated local router at `/api/plugins/agent-room` and, only when `peer_principal` is configured as a member, advertises/handles deterministic A2A skill `agent-room-v1`.
 
-When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. Multiple configured members share one worker but are addressed independently in this slice. The worker invokes only through `PluginHost.invoke_delegate`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP/A2A.
+When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. One source message may address multiple explicit targets in token order; one source/target pair remains unique. The worker invokes only through `PluginHost.invoke_delegate`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP/A2A.
+
+Authorized agent replies may create child mentions. Every mention persists its root source message, parent mention, principal chain, hop count, and source-token position. Configured cycle, hop, and per-room/per-target rate controls create visible `blocked` records and never invoke the target.
 
 ## Architecture
 
@@ -34,9 +36,10 @@ When `dispatch_targets` maps Room member principals to existing protoAgent named
 - Never trust `principal`, `author`, `source`, or similar identity fields from request payloads.
 - Only the canonical S1 owner assigns message sequence numbers.
 - Preserve stable client-message deduplication; conflicting content under one id must fail.
-- No dynamic rooms, cross-host routing, multi-target-in-one-message or agent-to-agent mention, attachments, reactions, search, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
+- No dynamic rooms, cross-host routing, attachments, reactions, search, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
 - Installation-specific principal/delegate names belong only in local config; public defaults remain empty.
-- `@all` is forbidden. Unmentioned text is silent. One source/target pair creates at most one useful turn/reply.
+- `@all` is forbidden. Unmentioned agents are silent. One source/target pair creates at most one useful turn/reply.
+- Agent-origin mentions require configured `can_mention`; cycles, excess hops, and rate-limit excess fail visibly without delegate work.
 - A restart during a possible delegate invocation becomes `ambiguous` and is never automatically replayed; cached `reply_ready` text may be posted idempotently without another invocation.
 - Host imports must stay lazy or absent so tests run without a protoAgent checkout.
 - Keep manifest and pyproject versions identical.
