@@ -84,6 +84,21 @@ class RoomStore:
                     PRIMARY KEY(room_id, principal),
                     UNIQUE(room_id, mention_token)
                 );
+                CREATE TABLE IF NOT EXISTS mentions (
+                    id TEXT PRIMARY KEY,
+                    room_id TEXT NOT NULL REFERENCES rooms(id),
+                    source_message_id TEXT NOT NULL REFERENCES messages(id),
+                    target_principal TEXT NOT NULL,
+                    token TEXT NOT NULL,
+                    delegate_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    reply_body TEXT,
+                    reply_message_id TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(source_message_id, target_principal)
+                );
                 CREATE TABLE IF NOT EXISTS cursors (
                     room_id TEXT NOT NULL REFERENCES rooms(id),
                     principal TEXT NOT NULL,
@@ -157,6 +172,26 @@ class RoomStore:
             "created_at": row["created_at"],
         }
 
+    @staticmethod
+    def _mention(row: sqlite3.Row) -> dict:
+        return {
+            key: row[key]
+            for key in (
+                "id",
+                "room_id",
+                "source_message_id",
+                "target_principal",
+                "token",
+                "delegate_name",
+                "status",
+                "reply_body",
+                "reply_message_id",
+                "error",
+                "created_at",
+                "updated_at",
+            )
+        }
+
     def list_rooms(self) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute("SELECT id, name, created_at FROM rooms ORDER BY created_at, id").fetchall()
@@ -172,6 +207,7 @@ class RoomStore:
         author_kind: str = "human",
         thread_id: str | None = None,
         reply_to_message_id: str | None = None,
+        mentions: list[dict] | None = None,
     ) -> dict:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -195,8 +231,18 @@ class RoomStore:
                 )
                 if not same_content:
                     raise RoomConflict("client_message_id already exists with different content")
+                mention_rows = conn.execute(
+                    "SELECT * FROM mentions WHERE source_message_id=? ORDER BY created_at, id",
+                    (existing["id"],),
+                ).fetchall()
                 conn.commit()
-                return {"created": False, "message": self._message(existing)}
+                result = {
+                    "created": False,
+                    "message": self._message(existing),
+                }
+                if mention_rows:
+                    result["mentions"] = [self._mention(row) for row in mention_rows]
+                return result
 
             room = conn.execute("SELECT 1 FROM rooms WHERE id=?", (room_id,)).fetchone()
             if room is None:
@@ -228,9 +274,166 @@ class RoomStore:
                     created_at,
                 ),
             )
+            for mention in mentions or []:
+                mention_id = str(uuid.uuid4())
+                mention_created_at = _now()
+                conn.execute(
+                    """INSERT INTO mentions(
+                           id, room_id, source_message_id, target_principal,
+                           token, delegate_name, status, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                    (
+                        mention_id,
+                        room_id,
+                        message_id,
+                        str(mention["target_principal"]),
+                        str(mention["token"]),
+                        str(mention["delegate_name"]),
+                        mention_created_at,
+                        mention_created_at,
+                    ),
+                )
             row = conn.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone()
+            mention_rows = conn.execute(
+                "SELECT * FROM mentions WHERE source_message_id=? ORDER BY created_at, id",
+                (message_id,),
+            ).fetchall()
             conn.commit()
-        return {"created": True, "message": self._message(row)}
+        result = {
+            "created": True,
+            "message": self._message(row),
+        }
+        if mention_rows:
+            result["mentions"] = [self._mention(mention_row) for mention_row in mention_rows]
+        return result
+
+    def pending_mentions(self, *, limit: int = 100) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM mentions WHERE status='pending'
+                   ORDER BY created_at, id LIMIT ?""",
+                (max(1, min(int(limit), 200)),),
+            ).fetchall()
+        return [self._mention(row) for row in rows]
+
+    def mentions_for_messages(self, message_ids: list[str]) -> list[dict]:
+        if not message_ids:
+            return []
+        placeholders = ",".join("?" for _ in message_ids)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""SELECT * FROM mentions WHERE source_message_id IN ({placeholders})
+                    ORDER BY created_at, id""",
+                tuple(message_ids),
+            ).fetchall()
+        return [self._mention(row) for row in rows]
+
+    def mention(self, mention_id: str) -> dict:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"unknown mention {mention_id!r}")
+        return self._mention(row)
+
+    def claim_mention_work(self) -> dict | None:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """SELECT m.*, msg.body AS source_body,
+                          msg.thread_id AS source_thread_id,
+                          msg.sequence AS source_sequence
+                   FROM mentions AS m
+                   JOIN messages AS msg ON msg.id=m.source_message_id
+                   WHERE m.status IN ('reply_ready', 'pending')
+                   ORDER BY CASE m.status WHEN 'reply_ready' THEN 0 ELSE 1 END,
+                            m.created_at, m.id LIMIT 1"""
+            ).fetchone()
+            if row is None:
+                conn.commit()
+                return None
+            if row["status"] == "pending":
+                updated_at = _now()
+                conn.execute(
+                    "UPDATE mentions SET status='invoking', updated_at=? WHERE id=? AND status='pending'",
+                    (updated_at, row["id"]),
+                )
+                status = "invoking"
+            else:
+                updated_at = row["updated_at"]
+                status = row["status"]
+            conn.commit()
+        return {
+            **self._mention(row),
+            "status": status,
+            "updated_at": updated_at,
+            "source_body": row["source_body"],
+            "source_thread_id": row["source_thread_id"],
+            "source_sequence": row["source_sequence"],
+        }
+
+    def thread_context(self, *, room_id: str, thread_id: str, through_sequence: int, limit: int = 20) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM messages
+                   WHERE room_id=? AND thread_id=? AND sequence<=?
+                   ORDER BY sequence DESC LIMIT ?""",
+                (room_id, thread_id, through_sequence, max(1, min(int(limit), 20))),
+            ).fetchall()
+        return [self._message(row) for row in reversed(rows)]
+
+    def save_mention_reply(self, mention_id: str, reply_body: str) -> dict:
+        body = str(reply_body or "").strip()
+        if not body:
+            raise ValueError("delegate returned an empty room reply")
+        if len(body) > 20000:
+            raise ValueError("delegate room reply exceeds 20000 characters")
+        with self._connect() as conn:
+            changed = conn.execute(
+                """UPDATE mentions SET status='reply_ready', reply_body=?, error=NULL, updated_at=?
+                   WHERE id=? AND status='invoking'""",
+                (body, _now(), mention_id),
+            ).rowcount
+            if changed != 1:
+                raise RoomConflict("mention is not in invoking state")
+            row = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
+        return self._mention(row)
+
+    def complete_mention(self, mention_id: str, reply_message_id: str) -> dict:
+        with self._connect() as conn:
+            changed = conn.execute(
+                """UPDATE mentions SET status='completed', reply_message_id=?, error=NULL, updated_at=?
+                   WHERE id=? AND status='reply_ready'""",
+                (reply_message_id, _now(), mention_id),
+            ).rowcount
+            if changed != 1:
+                raise RoomConflict("mention reply is not ready for completion")
+            row = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
+        return self._mention(row)
+
+    def fail_mention(self, mention_id: str, error: str) -> dict:
+        detail = str(error or "mention dispatch failed").strip()[:1000]
+        with self._connect() as conn:
+            conn.execute(
+                """UPDATE mentions SET status='failed', error=?, updated_at=?
+                   WHERE id=? AND status IN ('invoking', 'reply_ready')""",
+                (detail, _now(), mention_id),
+            )
+            row = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"unknown mention {mention_id!r}")
+        return self._mention(row)
+
+    def mark_interrupted_mentions_ambiguous(self) -> int:
+        with self._connect() as conn:
+            changed = conn.execute(
+                """UPDATE mentions
+                   SET status='ambiguous',
+                       error='restart interrupted a possible delegate invocation; automatic replay blocked',
+                       updated_at=?
+                   WHERE status='invoking'""",
+                (_now(),),
+            ).rowcount
+        return int(changed)
 
     def sync(self, *, room_id: str, after: int = 0, limit: int = 100) -> dict:
         page_size = max(1, min(int(limit), 200))
