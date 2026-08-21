@@ -14,9 +14,11 @@ This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fl
 - Gated local `post`, `sync`, `ack`, and `members` API
 - Deterministic A2A `agent-room-v1` wrapper for the same operations
 - Exact configured member-token resolution with durable mention state
+- Same-message delivery to multiple explicitly mentioned targets in token order
 - Lifecycle-managed named-delegate dispatch keyed by Room/thread
 - Reply text persisted before one idempotent attributed same-thread post
 - Restart-safe no-replay handling for ambiguous in-flight delegate turns
+- Persisted agent-origin chain, parent mention, hop count, cycle/hop/rate blocking
 - Sanitized mention delivery state returned through `room.sync`
 - Disabled by default
 
@@ -29,11 +31,17 @@ agent_room:
       delegate: assistant_local
     reviewer:
       delegate: reviewer_local
+  mention_policy:
+    max_agent_hops: 1
+    max_mentions_per_target: 5
+    rate_window_seconds: 60
 ```
 
-Each dispatch principal must also be a configured Room member, and each named delegate must already exist in protoAgent. Multiple targets may be configured behind the same worker and addressed independently; delegate identity plus the Room/thread conversation key keeps their ACP sessions separate. Plain text wakes nobody. `@all` and multiple targets in one message are rejected in this slice. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
+Each dispatch principal must also be a configured Room member, and each named delegate must already exist in protoAgent. Multiple explicit tokens in one message create one ordered durable mention per target; repeated tokens for the same target still create one mention. Delegate identity plus the Room/thread conversation key keeps ACP sessions separate. Plain text wakes nobody and `@all` remains rejected.
 
-Not included yet: multiple targets in one message, agent-to-agent mentions, cross-host routing, PC1 offline outbox, attachments, dynamic rooms, reactions, search, mutation, or general execution.
+An agent with `can_mention: true` may mention another configured agent from its Room reply. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
+
+Not included yet: cross-host routing, PC1 offline outbox, attachments, dynamic rooms, reactions, search, mutation, or general execution.
 
 ## Development
 

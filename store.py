@@ -6,6 +6,7 @@ Agent Organization room; dynamic room lifecycle is deliberately deferred.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
@@ -92,6 +93,11 @@ class RoomStore:
                     token TEXT NOT NULL,
                     delegate_name TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    parent_mention_id TEXT REFERENCES mentions(id),
+                    origin_message_id TEXT,
+                    origin_chain TEXT NOT NULL DEFAULT '[]',
+                    hop_count INTEGER NOT NULL DEFAULT 0,
+                    position INTEGER NOT NULL DEFAULT 0,
                     reply_body TEXT,
                     reply_message_id TEXT,
                     error TEXT,
@@ -108,6 +114,32 @@ class RoomStore:
                 );
                 """
             )
+            mention_columns = {row["name"] for row in conn.execute("PRAGMA table_info(mentions)").fetchall()}
+            migrations = {
+                "parent_mention_id": "ALTER TABLE mentions ADD COLUMN parent_mention_id TEXT REFERENCES mentions(id)",
+                "origin_message_id": "ALTER TABLE mentions ADD COLUMN origin_message_id TEXT",
+                "origin_chain": "ALTER TABLE mentions ADD COLUMN origin_chain TEXT NOT NULL DEFAULT '[]'",
+                "hop_count": "ALTER TABLE mentions ADD COLUMN hop_count INTEGER NOT NULL DEFAULT 0",
+                "position": "ALTER TABLE mentions ADD COLUMN position INTEGER NOT NULL DEFAULT 0",
+            }
+            for column, statement in migrations.items():
+                if column not in mention_columns:
+                    conn.execute(statement)
+            legacy_mentions = conn.execute(
+                "SELECT id, source_message_id, target_principal, origin_message_id, origin_chain FROM mentions"
+            ).fetchall()
+            for mention in legacy_mentions:
+                origin_message_id = mention["origin_message_id"] or mention["source_message_id"]
+                try:
+                    chain = json.loads(mention["origin_chain"] or "[]")
+                except (TypeError, ValueError):
+                    chain = []
+                if not isinstance(chain, list) or not chain:
+                    chain = [mention["target_principal"]]
+                conn.execute(
+                    "UPDATE mentions SET origin_message_id=?, origin_chain=? WHERE id=?",
+                    (origin_message_id, json.dumps(chain), mention["id"]),
+                )
             conn.execute(
                 "INSERT OR IGNORE INTO rooms(id, name, created_at) VALUES (?, ?, ?)",
                 (ROOM_ID, ROOM_NAME, _now()),
@@ -174,7 +206,7 @@ class RoomStore:
 
     @staticmethod
     def _mention(row: sqlite3.Row) -> dict:
-        return {
+        mention = {
             key: row[key]
             for key in (
                 "id",
@@ -184,6 +216,10 @@ class RoomStore:
                 "token",
                 "delegate_name",
                 "status",
+                "parent_mention_id",
+                "origin_message_id",
+                "hop_count",
+                "position",
                 "reply_body",
                 "reply_message_id",
                 "error",
@@ -191,6 +227,8 @@ class RoomStore:
                 "updated_at",
             )
         }
+        mention["origin_chain"] = json.loads(row["origin_chain"] or "[]")
+        return mention
 
     def list_rooms(self) -> list[dict]:
         with self._connect() as conn:
@@ -232,7 +270,7 @@ class RoomStore:
                 if not same_content:
                     raise RoomConflict("client_message_id already exists with different content")
                 mention_rows = conn.execute(
-                    "SELECT * FROM mentions WHERE source_message_id=? ORDER BY created_at, id",
+                    "SELECT * FROM mentions WHERE source_message_id=? ORDER BY position, created_at, id",
                     (existing["id"],),
                 ).fetchall()
                 conn.commit()
@@ -277,25 +315,49 @@ class RoomStore:
             for mention in mentions or []:
                 mention_id = str(uuid.uuid4())
                 mention_created_at = _now()
+                target_principal = str(mention["target_principal"])
+                origin_chain = mention.get("origin_chain") or [target_principal]
+                status = str(mention.get("status") or "pending")
+                error = str(mention.get("error") or "") or None
+                rate_limit = max(0, int(mention.get("rate_limit") or 0))
+                rate_since = str(mention.get("rate_since") or "")
+                if status == "pending" and rate_limit and rate_since:
+                    recent = conn.execute(
+                        """SELECT COUNT(*) AS value FROM mentions
+                           WHERE room_id=? AND target_principal=? AND created_at>=? AND status!='blocked'""",
+                        (room_id, target_principal, rate_since),
+                    ).fetchone()["value"]
+                    if int(recent) >= rate_limit:
+                        status = "blocked"
+                        error = "mention rate limit reached"
                 conn.execute(
                     """INSERT INTO mentions(
                            id, room_id, source_message_id, target_principal,
-                           token, delegate_name, status, created_at, updated_at
-                       ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                           token, delegate_name, status, parent_mention_id,
+                           origin_message_id, origin_chain, hop_count, position,
+                           error, created_at, updated_at
+                       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         mention_id,
                         room_id,
                         message_id,
-                        str(mention["target_principal"]),
+                        target_principal,
                         str(mention["token"]),
                         str(mention["delegate_name"]),
+                        status,
+                        mention.get("parent_mention_id"),
+                        str(mention.get("origin_message_id") or message_id),
+                        json.dumps([str(principal) for principal in origin_chain]),
+                        max(0, int(mention.get("hop_count") or 0)),
+                        max(0, int(mention.get("position") or 0)),
+                        error,
                         mention_created_at,
                         mention_created_at,
                     ),
                 )
             row = conn.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone()
             mention_rows = conn.execute(
-                "SELECT * FROM mentions WHERE source_message_id=? ORDER BY created_at, id",
+                "SELECT * FROM mentions WHERE source_message_id=? ORDER BY position, created_at, id",
                 (message_id,),
             ).fetchall()
             conn.commit()
@@ -322,8 +384,10 @@ class RoomStore:
         placeholders = ",".join("?" for _ in message_ids)
         with self._connect() as conn:
             rows = conn.execute(
-                f"""SELECT * FROM mentions WHERE source_message_id IN ({placeholders})
-                    ORDER BY created_at, id""",
+                f"""SELECT m.* FROM mentions AS m
+                    JOIN messages AS msg ON msg.id=m.source_message_id
+                    WHERE m.source_message_id IN ({placeholders})
+                    ORDER BY msg.sequence, m.position, m.created_at, m.id""",
                 tuple(message_ids),
             ).fetchall()
         return [self._mention(row) for row in rows]
@@ -346,7 +410,7 @@ class RoomStore:
                    JOIN messages AS msg ON msg.id=m.source_message_id
                    WHERE m.status IN ('reply_ready', 'pending')
                    ORDER BY CASE m.status WHEN 'reply_ready' THEN 0 ELSE 1 END,
-                            m.created_at, m.id LIMIT 1"""
+                            msg.sequence, m.position, m.created_at, m.id LIMIT 1"""
             ).fetchone()
             if row is None:
                 conn.commit()
@@ -370,6 +434,15 @@ class RoomStore:
             "source_thread_id": row["source_thread_id"],
             "source_sequence": row["source_sequence"],
         }
+
+    def recent_mention_count(self, *, room_id: str, target_principal: str, since: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS value FROM mentions
+                   WHERE room_id=? AND target_principal=? AND created_at>=? AND status!='blocked'""",
+                (room_id, target_principal, since),
+            ).fetchone()
+        return int(row["value"])
 
     def thread_context(self, *, room_id: str, thread_id: str, through_sequence: int, limit: int = 20) -> list[dict]:
         with self._connect() as conn:

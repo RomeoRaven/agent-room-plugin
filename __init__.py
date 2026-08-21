@@ -41,9 +41,10 @@ def register(registry) -> None:
     local_principal = str(config.get("local_principal") or (owner or {}).get("principal") or "operator").strip()
     peer_principal = str(config.get("peer_principal") or "").strip()
     dispatch_targets = config.get("dispatch_targets") if isinstance(config.get("dispatch_targets"), dict) else {}
+    mention_policy = config.get("mention_policy") if isinstance(config.get("mention_policy"), dict) else {}
 
     store = RoomStore(_data_dir(config) / "agent-room.db", owner=owner, members=members)
-    operations = RoomOperations(store, dispatch_targets=dispatch_targets)
+    operations = RoomOperations(store, dispatch_targets=dispatch_targets, mention_policy=mention_policy)
     registry.register_router(
         build_router(operations, local_principal=local_principal),
         prefix="/api/plugins/agent-room",
@@ -59,7 +60,9 @@ def register(registry) -> None:
         if not callable(invoke_delegate):
             raise RuntimeError("configured Room dispatch requires the named-delegate host service")
         typed_invoke = cast(Callable[[str, str, str], Awaitable[str]], invoke_delegate)
-        surface = MentionSurface(MentionWorker(store, invoke_delegate=typed_invoke))
+        surface = MentionSurface(
+            MentionWorker(store, invoke_delegate=typed_invoke, resolve_mentions=operations.resolve_mentions)
+        )
         registry.register_surface(surface.start, surface.stop, name="mention-delivery")
 
     # No configured peer means local owner mode only. Do not advertise a skill

@@ -1,6 +1,6 @@
 id: agent-room
 name: Agent Room Backend
-version: 0.2.0
+version: 0.3.0
 description: >-
   Durable model-free shared-room backend for protoAgent: one fixed room,
   ordered messages, stable client-message deduplication, cursors, membership,
@@ -26,6 +26,10 @@ config:
     can_mention: true
   members: []
   dispatch_targets: {}
+  mention_policy:
+    max_agent_hops: 1
+    max_mentions_per_target: 5
+    rate_window_seconds: 60
 
 capabilities:
   network: []
