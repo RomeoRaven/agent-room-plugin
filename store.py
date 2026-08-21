@@ -98,7 +98,14 @@ class RoomStore:
                 (ROOM_ID, ROOM_NAME, _now()),
             )
             configured = [owner, *members]
-            principals = [str(member["principal"]) for member in configured]
+            principals = [str(member["principal"]).strip() for member in configured]
+            principal_keys = [principal.casefold() for principal in principals]
+            if any(not principal for principal in principals) or len(set(principal_keys)) != len(principal_keys):
+                raise ValueError("duplicate configured room principal")
+            mention_tokens = [str(member["mention_token"]).strip() for member in configured]
+            mention_keys = [token.casefold() for token in mention_tokens]
+            if any(not token for token in mention_tokens) or len(set(mention_keys)) != len(mention_keys):
+                raise ValueError("duplicate configured mention token")
             placeholders = ",".join("?" for _ in principals)
             conn.execute(
                 f"DELETE FROM members WHERE room_id=? AND principal NOT IN ({placeholders})",
@@ -124,11 +131,11 @@ class RoomStore:
                          can_mention=excluded.can_mention""",
                     (
                         ROOM_ID,
-                        str(member["principal"]),
+                        str(member["principal"]).strip(),
                         str(member.get("kind") or "human"),
                         str(member["display_name"]),
                         str(member.get("role") or "member"),
-                        str(member["mention_token"]),
+                        str(member["mention_token"]).strip(),
                         str(member.get("host") or "operator"),
                         int(bool(member.get("can_post", member is owner))),
                         int(bool(member.get("can_mention", member is owner))),

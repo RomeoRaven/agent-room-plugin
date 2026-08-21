@@ -147,3 +147,22 @@ def test_reopen_reconciles_trusted_member_permissions_and_revocations(tmp_path):
     with pytest.raises(PermissionError, match="not a posting member"):
         reopened.post(room_id="ao", principal="pc1", client_message_id="pc1-1", body="Revoked")
     assert reopened.is_member(room_id="ao", principal="observer") is False
+
+
+def test_duplicate_configured_principal_or_mention_token_fails_closed(tmp_path):
+    duplicate_owner = {**OWNER, "role": "member", "can_post": False}
+    with pytest.raises(ValueError, match="duplicate configured room principal"):
+        _store(tmp_path / "principal.db", members=[duplicate_owner])
+
+    first = {
+        "principal": "one",
+        "kind": "agent",
+        "display_name": "One",
+        "role": "member",
+        "mention_token": "@Agent",
+        "host": "s1",
+        "can_post": True,
+        "can_mention": False,
+    }
+    with pytest.raises(ValueError, match="duplicate configured mention token"):
+        _store(tmp_path / "mention.db", members=[first, {**first, "principal": "two", "display_name": "Two"}])
