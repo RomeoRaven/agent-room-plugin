@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -28,6 +28,12 @@ class FakeRegistry:
         self.routers = []
         self.skills = []
         self.handlers = {}
+        self.surfaces = []
+
+        async def invoke_delegate(_name, _prompt, _key):
+            return "reply"
+
+        self.host = SimpleNamespace(invoke_delegate=invoke_delegate)
 
     def register_router(self, router, prefix=None):
         self.routers.append((prefix, router))
@@ -37,6 +43,9 @@ class FakeRegistry:
 
     def register_a2a_handler(self, skill_id, handler):
         self.handlers[skill_id] = handler
+
+    def register_surface(self, start, stop=None, name=None, reload=None):
+        self.surfaces.append({"start": start, "stop": stop, "name": name, "reload": reload})
 
 
 def _config(tmp_path, *, peer=True):
@@ -90,6 +99,33 @@ def test_register_without_peer_keeps_local_api_but_advertises_no_a2a_skill(tmp_p
     assert len(registry.routers) == 1
     assert registry.skills == []
     assert registry.handlers == {}
+    assert registry.surfaces == []
+
+
+def test_register_configured_dispatch_target_adds_one_worker_surface(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path, peer=False)
+    config["members"].append(
+        {
+            "principal": "hermes",
+            "kind": "agent",
+            "display_name": "Hermes",
+            "role": "member",
+            "mention_token": "@Hermes",
+            "host": "s1",
+            "can_post": True,
+            "can_mention": False,
+        }
+    )
+    config["dispatch_targets"] = {"hermes": {"delegate": "hermes_s1"}}
+    registry = FakeRegistry(config)
+
+    plugin.register(registry)
+
+    assert len(registry.surfaces) == 1
+    assert registry.surfaces[0]["name"] == "mention-delivery"
+    assert callable(registry.surfaces[0]["start"])
+    assert callable(registry.surfaces[0]["stop"])
 
 
 def test_data_dir_does_not_fallback_when_host_path_resolution_fails(monkeypatch):

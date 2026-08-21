@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import cast
 
 try:  # package load under protoAgent
     from .api import build_router
+    from .dispatch import MentionSurface, MentionWorker
     from .operations import RoomOperations
     from .store import RoomStore
     from .transport import SKILL_ID, build_handler
 except ImportError:  # host-free pytest imports root __init__ directly
     from api import build_router
+    from dispatch import MentionSurface, MentionWorker
     from operations import RoomOperations
     from store import RoomStore
     from transport import SKILL_ID, build_handler
@@ -36,13 +40,27 @@ def register(registry) -> None:
     members = config.get("members") if isinstance(config.get("members"), list) else []
     local_principal = str(config.get("local_principal") or (owner or {}).get("principal") or "operator").strip()
     peer_principal = str(config.get("peer_principal") or "").strip()
+    dispatch_targets = config.get("dispatch_targets") if isinstance(config.get("dispatch_targets"), dict) else {}
 
     store = RoomStore(_data_dir(config) / "agent-room.db", owner=owner, members=members)
-    operations = RoomOperations(store)
+    operations = RoomOperations(store, dispatch_targets=dispatch_targets)
     registry.register_router(
         build_router(operations, local_principal=local_principal),
         prefix="/api/plugins/agent-room",
     )
+
+    if dispatch_targets:
+        for principal, target in dispatch_targets.items():
+            delegate_name = str(target.get("delegate") or "").strip() if isinstance(target, dict) else ""
+            if not store.is_member(room_id="ao", principal=str(principal)) or not delegate_name:
+                raise ValueError("each dispatch target must bind a configured room member to a named delegate")
+        host = getattr(registry, "host", None)
+        invoke_delegate = getattr(host, "invoke_delegate", None)
+        if not callable(invoke_delegate):
+            raise RuntimeError("configured Room dispatch requires the named-delegate host service")
+        typed_invoke = cast(Callable[[str, str, str], Awaitable[str]], invoke_delegate)
+        surface = MentionSurface(MentionWorker(store, invoke_delegate=typed_invoke))
+        registry.register_surface(surface.start, surface.stop, name="mention-delivery")
 
     # No configured peer means local owner mode only. Do not advertise a skill
     # whose request would otherwise fall through to the normal model loop.
