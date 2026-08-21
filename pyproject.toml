@@ -1,0 +1,22 @@
+[project]
+name = "agent-room-plugin"
+version = "0.1.0"
+description = "Durable shared-room backend plugin for protoAgent."
+requires-python = ">=3.11"
+license = "MIT"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E402", "E501", "E702", "E731", "E741"]
+
+[tool.ruff.format]
+quote-style = "double"
