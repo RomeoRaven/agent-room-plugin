@@ -66,3 +66,35 @@ def test_local_api_room_listing_requires_bound_membership(tmp_path):
 
     assert response.status_code == 403
     assert "not a room member" in response.json()["detail"]
+
+
+def test_local_api_exposes_room_lifecycle_bounded_history_and_search(tmp_path):
+    client = _client(tmp_path)
+
+    created = client.post("/api/plugins/agent-room/rooms", json={"name": "Subject room"})
+    assert created.status_code == 200
+    room_id = created.json()["result"]["room"]["id"]
+    assert client.patch(f"/api/plugins/agent-room/rooms/{room_id}", json={"name": "Renamed subject"}).status_code == 200
+    assert (
+        client.post(
+            f"/api/plugins/agent-room/rooms/{room_id}/post",
+            json={"client_message_id": "searchable", "body": "searchable history"},
+        ).status_code
+        == 200
+    )
+    assert client.post(f"/api/plugins/agent-room/rooms/{room_id}/reset").status_code == 200
+
+    current = client.get(f"/api/plugins/agent-room/rooms/{room_id}/messages?limit=20")
+    history = client.get(f"/api/plugins/agent-room/rooms/{room_id}/messages?limit=20&history=true")
+    searched = client.get(
+        "/api/plugins/agent-room/search",
+        params={"q": "searchable", "scope": "current", "room_id": room_id, "history": "true"},
+    )
+    assert current.status_code == 200 and current.json()["result"]["messages"] == []
+    assert history.status_code == 200 and len(history.json()["result"]["messages"]) == 1
+    assert searched.status_code == 200 and searched.json()["result"]["results"][0]["room_name"] == "Renamed subject"
+
+    assert client.post(f"/api/plugins/agent-room/rooms/{room_id}/archive").status_code == 200
+    archived = client.get("/api/plugins/agent-room/rooms?status=archived")
+    assert [room["id"] for room in archived.json()["rooms"]] == [room_id]
+    assert client.post(f"/api/plugins/agent-room/rooms/{room_id}/restore").status_code == 200

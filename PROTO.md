@@ -4,10 +4,13 @@ Read this before changing anything. This repository is the durable backend owner
 
 ## Current accepted scope
 
-Version 0.3.x owns one fixed `ao` room and four model-free operations:
+Version 0.5.x owns migration-safe subject rooms and model-free operations for:
 
+- `room.list` / `room.create` / `room.rename` — discover and manage subject rooms;
+- `room.archive` / `room.restore` / `room.reset` — reversible read-only archive and non-destructive Start fresh;
+- `room.search` — bounded FTS5 search across current, earlier, active, or archived history;
 - `room.post` — canonically order one message and deduplicate retries by bound principal + stable client message id;
-- `room.sync` — return a bounded ascending page and sanitized mention state after a canonical sequence;
+- `room.sync` — return recent, older, incremental, or bounded-around-message windows plus sanitized mention state;
 - `room.ack` — persist a monotonic member cursor;
 - `room.members` — return room-visible membership.
 
@@ -36,9 +39,11 @@ Authorized agent replies may create child mentions. Every mention persists its r
 - Keep the repository backend-only; do not add a second Room UI.
 - Keep `enabled: false` by default.
 - Never trust `principal`, `author`, `source`, or similar identity fields from request payloads.
-- Only the canonical S1 owner assigns message sequence numbers.
+- Only the canonical Room owner assigns per-room message sequence numbers and may change room lifecycle.
 - Preserve stable client-message deduplication; conflicting content under one id must fail.
-- No dynamic rooms, cross-host routing, attachments, reactions, search, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
+- Archive and Start fresh must fail while agent delivery is pending; archived rooms reject new posts but preserve idempotent retries of already accepted messages.
+- Start fresh never deletes messages. Earlier history remains bounded, searchable, and available on explicit request.
+- No cross-host routing, attachments, reactions, per-room roster administration, permanent deletion, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
 - Installation-specific principal/delegate names belong only in local config; public defaults remain empty.
 - `@all` is forbidden. Unmentioned agents are silent. One source/target pair creates at most one useful turn/reply.
 - Agent-origin mentions require configured `can_mention`; cycles, excess hops, and rate-limit excess fail visibly without delegate work.
@@ -54,12 +59,12 @@ Keep multi-device concerns outside the local core:
 
 | Concern | Owner |
 |---|---|
-| Canonical messages, membership, cursors, mention records, local dispatch | Agent Room plugin |
-| Navigation, member click, mention picker, recipient guidance, accessible composer | Native protoAgent console |
+| Canonical rooms/lifecycle/search, messages, membership, cursors, mention records, local dispatch | Agent Room plugin |
+| Room switching/lifecycle/search UI, member click, mention picker, recipient guidance, accessible composer | Native protoAgent console |
 | Private route, TLS, directional credentials, advertised URLs, offline outbox, reconciliation | Optional peer/client adapter |
 | Authoritative agent identity and principal-to-runtime binding | Host-local roster adapter |
 
-The conditional `agent-room-v1` A2A handler is only a deterministic adapter over `post`, `sync`, `ack`, and `members`. Do not grow it into route provisioning, credential distribution, retry scheduling, PC1-specific knowledge, or a second Room owner.
+The conditional `agent-room-v1` A2A handler is only a deterministic adapter over the Room operations. Do not grow it into route provisioning, credential distribution, retry scheduling, PC1-specific knowledge, or a second Room owner.
 
 ## Gate
 

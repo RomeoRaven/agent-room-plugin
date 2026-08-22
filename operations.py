@@ -12,7 +12,21 @@ except ImportError:  # host-free direct module tests
 
 
 CONTRACT_VERSION = "1"
-OPERATIONS = frozenset({"room.post", "room.sync", "room.ack", "room.members"})
+OPERATIONS = frozenset(
+    {
+        "room.list",
+        "room.create",
+        "room.rename",
+        "room.archive",
+        "room.restore",
+        "room.reset",
+        "room.search",
+        "room.post",
+        "room.sync",
+        "room.ack",
+        "room.members",
+    }
+)
 _IDENTITY_FIELDS = frozenset({"principal", "author", "author_principal", "source"})
 _PUBLIC_MENTION_FIELDS = (
     "id",
@@ -173,12 +187,63 @@ class RoomOperations:
         if forbidden:
             raise ValueError(f"identity fields are host-bound and forbidden in payload: {', '.join(forbidden)}")
 
-        room_id = _string(payload, "room_id", max_length=100)
         bound_principal = str(principal or "").strip()
+        if not bound_principal:
+            raise PermissionError("bound principal is required")
+        if operation == "room.list":
+            result = {
+                "rooms": self.store.list_rooms(
+                    principal=bound_principal,
+                    status=str(payload.get("status") or "all").strip().lower(),
+                )
+            }
+            return {"contract_version": CONTRACT_VERSION, "operation": operation, "result": result}
+        if operation == "room.create":
+            result = {
+                "room": self.store.create_room(
+                    name=_string(payload, "name", max_length=120),
+                    principal=bound_principal,
+                )
+            }
+            return {"contract_version": CONTRACT_VERSION, "operation": operation, "result": result}
+        if operation == "room.search":
+            scope = str(payload.get("scope") or "current").strip().lower()
+            search_room_id = str(payload.get("room_id") or "").strip() or None
+            if scope == "current" and (
+                not search_room_id or not self.store.is_member(room_id=search_room_id, principal=bound_principal)
+            ):
+                raise PermissionError(f"principal {bound_principal!r} is not a room member")
+            result = {
+                "results": self.store.search(
+                    query=_string(payload, "query", max_length=500),
+                    principal=bound_principal,
+                    scope=scope,
+                    room_id=search_room_id,
+                    history=bool(payload.get("history", False)),
+                    limit=int(payload.get("limit") or 50),
+                )
+            }
+            return {"contract_version": CONTRACT_VERSION, "operation": operation, "result": result}
+
+        room_id = _string(payload, "room_id", max_length=100)
         if not bound_principal or not self.store.is_member(room_id=room_id, principal=bound_principal):
             raise PermissionError(f"principal {bound_principal!r} is not a room member")
 
-        if operation == "room.post":
+        if operation == "room.rename":
+            result = {
+                "room": self.store.rename_room(
+                    room_id=room_id,
+                    name=_string(payload, "name", max_length=120),
+                    principal=bound_principal,
+                )
+            }
+        elif operation == "room.archive":
+            result = {"room": self.store.archive_room(room_id=room_id, principal=bound_principal)}
+        elif operation == "room.restore":
+            result = {"room": self.store.restore_room(room_id=room_id, principal=bound_principal)}
+        elif operation == "room.reset":
+            result = {"room": self.store.reset_room(room_id=room_id, principal=bound_principal)}
+        elif operation == "room.post":
             body = _string(payload, "body", max_length=20000)
             result = self.store.post(
                 room_id=room_id,
@@ -194,8 +259,11 @@ class RoomOperations:
         elif operation == "room.sync":
             result = self.store.sync(
                 room_id=room_id,
-                after=int(payload.get("after") or 0),
+                after=int(payload["after"]) if payload.get("after") is not None else None,
+                before=int(payload["before"]) if payload.get("before") is not None else None,
+                around=int(payload["around"]) if payload.get("around") is not None else None,
                 limit=int(payload.get("limit") or 100),
+                history=bool(payload.get("history", False)),
             )
             result["mentions"] = self._public_mentions(
                 self.store.mentions_for_messages([message["id"] for message in result["messages"]])

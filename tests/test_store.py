@@ -23,13 +23,16 @@ def _store(path, *, members=None):
     return RoomStore(path, owner=OWNER, members=members)
 
 
-def test_fixed_room_post_is_ordered_idempotent_and_restart_persistent(tmp_path):
+def test_default_room_post_is_ordered_idempotent_and_restart_persistent(tmp_path):
     path = tmp_path / "agent-room.db"
     store = _store(path)
 
-    assert store.list_rooms() == [
-        {"id": "ao", "name": "Agent Organization", "created_at": store.list_rooms()[0]["created_at"]}
-    ]
+    rooms = store.list_rooms()
+    assert len(rooms) == 1
+    assert rooms[0]["id"] == "ao"
+    assert rooms[0]["name"] == "Agent Organization"
+    assert rooms[0]["status"] == "active"
+    assert rooms[0]["latest_sequence"] == 0
 
     first = store.post(
         room_id="ao",
