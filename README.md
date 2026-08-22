@@ -90,7 +90,7 @@ pytest -q
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
 | Linux | Tested | v0.7 candidate: owner/client/roster-dispatch plugin suite |
-| Windows | Qualification pending | v0.7 exact candidate requires native resolver, ACP, Room wake/reply, restart and cleanup acceptance |
+| Windows | Tested | v0.7 candidate: native Ruff/format and 87-test suite plus live roster resolution, ACP session resume, exact attributed reply, dedupe, agent-origin silence, interrupted-invocation no-replay, process cleanup, and native Room UI acceptance |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.

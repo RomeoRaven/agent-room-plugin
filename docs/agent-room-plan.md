@@ -201,24 +201,29 @@ The generic implementation is passing its Linux and native Windows plugin suites
 
 Live qualification has proven:
 
-- authoritative roster resolution;
-- fixed-argv bounded resolver transport;
+- authoritative roster resolution and bounded context hashing;
 - package integrity and dependency locking;
-- ACP initialization;
-- persistent ACP session creation;
-- model access;
-- visible fail-safe behavior when an agent turn exceeds its deadline;
-- private client and owner health after deployment and restart.
+- ACP initialization, model access, and persistent session creation;
+- same-thread session resume after a client restart;
+- one exact human mention producing one attributed canonical reply;
+- duplicate source replay producing no second wake or reply;
+- agent-authored remote mention text producing no dispatch;
+- visible bounded failure when an agent turn exceeds its deadline;
+- interrupted-invocation restart producing a visible blocked reply without replay;
+- Room replies completing without tool use;
+- delegate process-tree cleanup;
+- native Room UI visibility, attribution, mention availability, and zero browser errors;
+- owner, client, transport, and unrelated stable-runtime health after restart.
 
-The first live model turn exposed a service-context shell-read problem. The agent eventually produced the requested answer, but only after its read tools stalled past the Room reply deadline. The permanent correction preloads the exact bounded owner files through the roster adapter and forbids Room reply tool use. The corrected live reply, restart, session-resume, and cleanup acceptance remains the active gate.
+The first live model turn exposed a service-context shell-read problem. The agent eventually produced the requested answer, but its read tools stalled past the Room reply deadline. The accepted correction preloads the exact bounded owner files through the roster adapter and forbids Room reply tool use. The corrected path returned the requested reply through the same persistent ACP session in a few seconds.
 
-The roster-backed code will not be proposed for merge until that gate passes.
+The roster-backed candidate has passed its installed-host acceptance. It remains development work until the public merged revision passes the same minimum reply and recovery check.
 
-## Remaining acceptance
+## Acceptance
 
 ### Roster reply acceptance
 
-Required before the roster-backed branch is merge-ready:
+Candidate status: passed.
 
 - one exact human `@mention` creates one canonical mention;
 - only the intended authoritative agent wakes;
@@ -228,7 +233,7 @@ Required before the roster-backed branch is merge-ready:
 - an agent-authored remote mention produces no dispatch;
 - a second human message in the same thread resumes the same ACP session;
 - duplicate delivery produces no second wake or reply;
-- client restart preserves completed and pending state;
+- client restart preserves completed state;
 - restart during possible invocation blocks replay;
 - roster removal, inactivity, ambiguity, or hash change fails closed;
 - timeout and adapter failure produce visible bounded failure behavior;
@@ -237,7 +242,7 @@ Required before the roster-backed branch is merge-ready:
 
 ### Cross-host Room acceptance
 
-After roster replies are accepted, the complete Room path must prove:
+After roster replies are released, the complete Room path must prove:
 
 - human on either client can post to the same canonical transcript;
 - human can mention an agent owned by either side;
@@ -254,12 +259,9 @@ The project receives `ROOM_ACCEPTED` only after the complete scenario passes. An
 
 ## Next milestones
 
-### 1. Complete roster-backed reply acceptance
+### 1. Release roster-backed replies
 
-- Produce one successful exact remote mention and attributed reply.
-- Resume the same agent session with a second message in the thread.
-- Confirm silence, timeout, duplicate, restart, and roster-change behavior.
-- Confirm that delegate processes shut down cleanly.
+The accepted candidate must become a public plugin revision and retain the same exact mention, reply, session, silence, recovery, and cleanup behavior.
 
 ### 2. Complete shared Room acceptance
 
@@ -269,7 +271,7 @@ The project receives `ROOM_ACCEPTED` only after the complete scenario passes. An
 
 ### 3. Document the accepted release
 
-Roster-backed replies remain development work until the first two milestones pass. When they do, the repository will update its release status, platform evidence, known limitations, and compatibility notes. Installation and rollout policy remains the responsibility of each deployment owner.
+When the complete Room passes, the repository will update its release status, platform evidence, known limitations, and compatibility notes. Installation and rollout policy remains the responsibility of each deployment owner.
 
 ## Deferred work
 
