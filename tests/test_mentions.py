@@ -152,7 +152,7 @@ async def test_worker_invokes_once_and_posts_one_same_thread_reply(tmp_path):
 
     assert len(calls) == 1
     assert calls[0][0] == "hermes_s1"
-    assert calls[0][2] == f"ao:{source['message']['thread_id']}"
+    assert calls[0][2] == f"ao:1:{source['message']['thread_id']}"
     assert "Status please @Hermes" in calls[0][1]
 
     messages = store.sync(room_id="ao", after=0, limit=10)["messages"]
@@ -167,6 +167,34 @@ async def test_worker_invokes_once_and_posts_one_same_thread_reply(tmp_path):
     mention = store.mention(source["mentions"][0]["id"])
     assert mention["status"] == "completed"
     assert mention["reply_message_id"] == reply["id"]
+
+
+@pytest.mark.asyncio
+async def test_start_fresh_changes_delegate_conversation_generation_even_when_thread_id_is_reused(tmp_path):
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES])
+    operations = RoomOperations(store, dispatch_targets={"hermes": {"delegate": "hermes_s1"}})
+    keys = []
+
+    async def invoke(delegate_name: str, prompt: str, conversation_key: str) -> str:
+        keys.append(conversation_key)
+        return "done"
+
+    operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "old", "body": "old @Hermes", "thread_id": "same"},
+        principal="dennis",
+    )
+    worker = MentionWorker(store, invoke_delegate=invoke)
+    assert await worker.run_once() is True
+    operations.execute("room.reset", {"room_id": "ao"}, principal="dennis")
+    operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "new", "body": "new @Hermes", "thread_id": "same"},
+        principal="dennis",
+    )
+    assert await worker.run_once() is True
+
+    assert keys == ["ao:1:same", "ao:3:same"]
 
 
 @pytest.mark.asyncio
@@ -201,8 +229,8 @@ async def test_two_configured_targets_wake_independently_with_distinct_routes_an
     assert await worker.run_once() is False
 
     assert [(call[0], call[2]) for call in calls] == [
-        ("hermes_s1", f"ao:{hermes_source['message']['thread_id']}"),
-        ("headroom_s1", f"ao:{headroom_source['message']['thread_id']}"),
+        ("hermes_s1", f"ao:1:{hermes_source['message']['thread_id']}"),
+        ("headroom_s1", f"ao:1:{headroom_source['message']['thread_id']}"),
     ]
     messages = store.sync(room_id="ao", after=0, limit=10)["messages"]
     replies = [message for message in messages if message["author_kind"] == "agent"]
@@ -255,7 +283,7 @@ async def test_one_message_wakes_mentioned_targets_once_in_token_order_and_leave
 
     assert [mention["target_principal"] for mention in source["mentions"]] == ["hermes", "headroom"]
     assert [call[0] for call in calls] == ["hermes_s1", "headroom_s1"]
-    assert all(call[1] == f"ao:{source['message']['thread_id']}" for call in calls)
+    assert all(call[1] == f"ao:1:{source['message']['thread_id']}" for call in calls)
     messages = store.sync(room_id="ao", after=0, limit=10)["messages"]
     replies = [message for message in messages if message["author_kind"] == "agent"]
     assert [reply["author_principal"] for reply in replies] == ["hermes", "headroom"]

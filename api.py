@@ -31,23 +31,71 @@ def build_router(operations: RoomOperations, *, local_principal: str) -> APIRout
             raise HTTPException(400, str(exc)) from exc
 
     @router.get("/rooms")
-    def list_rooms():
-        rooms = [
-            room
-            for room in operations.store.list_rooms()
-            if operations.store.is_member(room_id=room["id"], principal=principal)
-        ]
+    def list_rooms(status: str = Query("active")):
+        envelope = execute("room.list", {"status": status})
+        rooms = envelope["result"]["rooms"]
         if not rooms:
-            raise HTTPException(403, f"principal {principal!r} is not a room member")
+            if not operations.store.list_rooms(principal=principal, status="all"):
+                raise HTTPException(403, f"principal {principal!r} is not a room member")
         return {"contract_version": CONTRACT_VERSION, "rooms": rooms}
+
+    @router.post("/rooms")
+    def create_room(payload: dict = Body(...)):
+        return execute("room.create", payload)
+
+    @router.patch("/rooms/{room_id}")
+    def rename_room(room_id: str, payload: dict = Body(...)):
+        return execute("room.rename", {**payload, "room_id": room_id})
+
+    @router.post("/rooms/{room_id}/archive")
+    def archive_room(room_id: str):
+        return execute("room.archive", {"room_id": room_id})
+
+    @router.post("/rooms/{room_id}/restore")
+    def restore_room(room_id: str):
+        return execute("room.restore", {"room_id": room_id})
+
+    @router.post("/rooms/{room_id}/reset")
+    def reset_room(room_id: str):
+        return execute("room.reset", {"room_id": room_id})
+
+    @router.get("/search")
+    def search_rooms(
+        q: str = Query(..., min_length=1, max_length=500),
+        scope: str = Query("current"),
+        room_id: str | None = Query(None),
+        history: bool = Query(False),
+        limit: int = Query(50, ge=1, le=100),
+    ):
+        return execute(
+            "room.search",
+            {"query": q, "scope": scope, "room_id": room_id, "history": history, "limit": limit},
+        )
 
     @router.post("/rooms/{room_id}/post")
     def post_message(room_id: str, payload: dict = Body(...)):
         return execute("room.post", {**payload, "room_id": room_id})
 
     @router.get("/rooms/{room_id}/messages")
-    def sync_messages(room_id: str, after: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=200)):
-        return execute("room.sync", {"room_id": room_id, "after": after, "limit": limit})
+    def sync_messages(
+        room_id: str,
+        after: int | None = Query(None, ge=0),
+        before: int | None = Query(None, ge=1),
+        around: int | None = Query(None, ge=1),
+        limit: int = Query(100, ge=1, le=200),
+        history: bool = Query(False),
+    ):
+        return execute(
+            "room.sync",
+            {
+                "room_id": room_id,
+                "after": after,
+                "before": before,
+                "around": around,
+                "limit": limit,
+                "history": history,
+            },
+        )
 
     @router.post("/rooms/{room_id}/ack")
     def acknowledge(room_id: str, payload: dict = Body(...)):

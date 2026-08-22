@@ -13,6 +13,7 @@ except ImportError:  # host-free direct module tests
 
 SKILL_ID = "agent-room-v1"
 MIME_TYPE = "application/vnd.romeoraven.agent-room-v1+json"
+TRANSPORT_OPERATIONS = frozenset({"room.post", "room.sync", "room.ack", "room.members"})
 
 
 def _metadata(context) -> dict:
@@ -50,9 +51,17 @@ def build_handler(operations: RoomOperations, *, peer_principal: str):
         if version != CONTRACT_VERSION:
             raise ValueError(f"unsupported agent-room contract version {version!r}")
         operation = str(envelope.get("operation") or "").strip()
+        if operation not in TRANSPORT_OPERATIONS:
+            raise ValueError(f"unsupported agent-room transport operation {operation!r}")
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
             raise ValueError("agent_room payload must be an object")
+        if operation == "room.sync":
+            local_fields = {field for field in ("before", "around", "history") if field in payload}
+            if local_fields:
+                field = sorted(local_fields)[0]
+                raise ValueError(f"unsupported agent-room transport payload field {field!r}")
+            payload = {**payload, "after": int(payload.get("after") or 0)}
         result = operations.execute(operation, payload, principal=principal)
         return [_data_part(result)]
 

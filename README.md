@@ -6,12 +6,15 @@ This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fl
 
 ## Current slice
 
-- One fixed Agent Organization room (`ao`)
+- Multiple subject rooms with migration-safe Agent Organization default (`ao`)
+- Owner-gated create, rename, archive, restore, and non-destructive Start fresh lifecycle
+- Bounded recent/older transcript windows and bounded search-result context
+- SQLite FTS5 search across current, earlier, active, and archived history
 - SQLite-backed ordered messages
 - Stable client-message retry deduplication and conflict detection
 - Config-bound membership and author identity
 - Persistent member cursors
-- Gated local `post`, `sync`, `ack`, and `members` API
+- Gated model-free Room list/lifecycle/search/post/sync/ack/members API
 - Room-visible `mentionable` state so the native composer suggests only configured local dispatch targets
 - Deterministic A2A `agent-room-v1` wrapper for the same operations
 - Exact configured member-token resolution with durable mention state
@@ -42,7 +45,9 @@ Each dispatch principal must also be a configured Room member, and each named de
 
 An agent with `can_mention: true` may mention another configured agent from its Room reply. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
 
-Not included yet: cross-host routing, PC1 offline outbox, attachments, dynamic rooms, reactions, search, mutation, or general execution.
+New rooms inherit the installation's configured owner/member roster. Archive is read-only but reversible. Start fresh advances the default visible-history boundary without deleting messages; earlier history remains paged, searchable, and restart-safe. Archive and Start fresh refuse rooms with pending agent delivery. Permanent message/room deletion is deliberately absent.
+
+Not included yet: cross-host routing, PC1 offline outbox, attachments, reactions, per-room roster administration, permanent deletion, or general execution.
 
 ## Local-first product boundary
 
@@ -50,12 +55,12 @@ A single protoAgent instance is the complete default product. Installations can 
 
 The ownership split is deliberate:
 
-- This plugin owns canonical Room storage, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and the stable `post` / `sync` / `ack` / `members` contract.
-- protoAgent's native console owns human interaction: navigation, member selection, mention autocomplete, recipient guidance, transcript rendering, and accessible keyboard behavior.
+- This plugin owns canonical Room storage, lifecycle, indexed search, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and the stable model-free Room operations.
+- protoAgent's native console owns human interaction: room switching and lifecycle controls, search presentation, navigation, member selection, mention autocomplete, recipient guidance, transcript rendering, and accessible keyboard behavior.
 - An optional peer/client adapter may call the same deterministic Room operations for another device. It owns transport, directional credentials, TLS, advertised URLs, offline outbox, and reconciliation; those concerns do not belong in this plugin's local core.
 - A host-local roster adapter maps that host's authoritative agents to Room principals. The Room plugin does not mirror or replace another host's agent identities.
 
-The A2A wrapper stays dormant unless `peer_principal` is explicitly configured. It is a transport seam over the same four operations, not a requirement for local use and not a multi-device lifecycle engine.
+The A2A wrapper stays dormant unless `peer_principal` is explicitly configured. It remains limited to the established `post`, `sync`, `ack`, and `members` operations; lifecycle and search are local-only in this release. It is not a requirement for local use or a multi-device lifecycle engine.
 
 ## Development
 
@@ -65,5 +70,13 @@ ruff check .
 ruff format --check .
 pytest -q
 ```
+
+## Platform validation
+
+| Platform | Status | Evidence / follow-up |
+|---|---|---|
+| Linux | Tested | v0.5 PR candidate: plugin suite, exact protoAgent host qualification, copied persistent-database migration |
+| Windows | Not tested | Intended; native validation has not been run for this release |
+| macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.
