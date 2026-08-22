@@ -4,7 +4,7 @@ Read this before changing anything. This repository is the durable backend owner
 
 ## Current accepted scope
 
-Version 0.6.x owns migration-safe subject rooms, deterministic peer-client state, and model-free operations for:
+Version 0.7.x owns migration-safe subject rooms, deterministic peer-client state, roster-bound client dispatch, and model-free operations for:
 
 - `room.list` / `room.create` / `room.rename` — discover and manage subject rooms;
 - `room.archive` / `room.restore` / `room.reset` — reversible read-only archive and non-destructive Start fresh;
@@ -32,7 +32,9 @@ Authorized agent replies may create child mentions. Every mention persists its r
 | `dispatch.py` | Lifecycle-managed pending mention worker and bounded `room_reply` prompt. |
 | `api.py` | Gated plugin API; room comes from URL and principal from plugin config. |
 | `transport.py` | A2A metadata validation and structured DataPart response; peer principal is host-configured. |
-| `client.py` | Optional HTTPS A2A client, pending-post/cursor-only SQLite state, and reconciliation surface. |
+| `client.py` | Optional HTTPS A2A client, pending-post/cursor/local-dispatch SQLite state, and reconciliation surface. |
+| `client_dispatch.py` | Live roster-bound client mention claim, bounded context, ACP wake, source recheck, and exact attributed reply. |
+| `resolver.py` | Fixed-argv bounded stdin/JSON bridge to the host-owned roster resolver. |
 | `client_api.py` | Fixed-room local API adapter for the native PC1 Room UI; no lifecycle/search or canonical storage. |
 | `tests/` | Host-free store, operation, API, A2A, registration, and manifest proof. |
 
@@ -40,13 +42,13 @@ Authorized agent replies may create child mentions. Every mention persists its r
 
 - Keep the repository backend-only; do not add a second Room UI.
 - Keep `enabled: false` by default.
-- Never trust `principal`, `author`, `source`, or similar identity fields from request payloads.
+- Never trust `principal`, `author`, `source`, or similar identity fields from request payloads. An authenticated peer may attest only an owner-allowlisted agent principal in the envelope, only for a post that completes that principal's existing canonical remote mention.
 - Only the canonical Room owner assigns per-room message sequence numbers and may change room lifecycle.
 - Preserve stable client-message deduplication; conflicting content under one id must fail.
 - Archive and Start fresh must fail while agent delivery is pending; archived rooms reject new posts but preserve idempotent retries of already accepted messages.
 - Start fresh never deletes messages. Earlier history remains bounded, searchable, and available on explicit request.
 - Client mode may consume a pre-provisioned private HTTPS route and directional credential; it never provisions routes/secrets or expands A2A beyond post/sync/ack/members.
-- No PC1 roster-agent wake, attachments, reactions, per-room roster administration, permanent deletion, autonomous response, execution, approval engine, or Fleet lifecycle in this slice.
+- No attachments, reactions, per-room roster administration, permanent deletion, autonomous unmentioned response, general execution, approval engine, or Fleet lifecycle in this slice.
 - Installation-specific principal/delegate names belong only in local config; public defaults remain empty.
 - `@all` is forbidden. Unmentioned agents are silent. One source/target pair creates at most one useful turn/reply.
 - Agent-origin mentions require configured `can_mention`; cycles, excess hops, and rate-limit excess fail visibly without delegate work.
@@ -65,10 +67,10 @@ Keep multi-device concerns outside the local core:
 | Canonical rooms/lifecycle/search, messages, membership, cursors, mention records, local dispatch | Agent Room plugin |
 | Room switching/lifecycle/search UI, member click, mention picker, recipient guidance, accessible composer | Native protoAgent console |
 | Private route, TLS, directional credentials, advertised URLs | Host deployment owner |
-| Pending-post outbox, cursor state, deterministic reconciliation | Plugin client mode |
+| Pending-post outbox, cursor state, deterministic reconciliation, local dispatch claim | Plugin client mode |
 | Authoritative agent identity and principal-to-runtime binding | Host-local roster adapter |
 
-The conditional owner-side `agent-room-v1` A2A handler and client-side caller remain deterministic adapters over `post`, `sync`, `ack`, and `members` only. Lifecycle and search stay owner-local. Client state contains pending posts and cursors only; it never caches canonical messages, assigns sequence numbers, provisions routes, distributes credentials, or becomes a second Room owner.
+The conditional owner-side `agent-room-v1` A2A handler and client-side caller remain deterministic adapters over `post`, `sync`, `ack`, and `members` only. Lifecycle and search stay owner-local. Client state contains pending posts, cursors, and local dispatch claims only; it never caches canonical messages, assigns sequence numbers, provisions routes, distributes credentials, or becomes a second Room owner. Roster identity is resolved live from the host adapter and is not copied into client state.
 
 ## Gate
 

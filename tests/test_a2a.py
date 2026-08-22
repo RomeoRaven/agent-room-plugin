@@ -7,7 +7,7 @@ from google.protobuf.json_format import MessageToDict
 
 from transport import MIME_TYPE, build_handler
 from operations import RoomOperations
-from store import RoomStore
+from store import RoomConflict, RoomStore
 
 
 def _handler(tmp_path):
@@ -50,6 +50,88 @@ async def test_a2a_handler_binds_peer_and_returns_structured_contract(tmp_path):
     assert wire["data"]["contract_version"] == "1"
     assert wire["data"]["operation"] == "room.post"
     assert wire["data"]["result"]["message"]["author_principal"] == "pc1"
+
+
+@pytest.mark.asyncio
+async def test_a2a_handler_accepts_allowlisted_host_attested_agent_reply_and_completes_remote_mention(tmp_path):
+    store = RoomStore(
+        tmp_path / "agent-room.db",
+        members=[
+            {
+                "principal": "pc1",
+                "kind": "host",
+                "display_name": "PC1",
+                "role": "member",
+                "mention_token": "@PC1",
+                "host": "pc1",
+                "can_post": True,
+                "can_mention": True,
+            },
+            {
+                "principal": "pla",
+                "kind": "agent",
+                "display_name": "protoLabs Agent",
+                "role": "member",
+                "mention_token": "@PLA",
+                "host": "pc1",
+                "can_post": True,
+                "can_mention": False,
+            },
+        ],
+    )
+    operations = RoomOperations(store, dispatch_targets={"pla": {"remote_peer": "pc1"}})
+    source = operations.execute(
+        "room.post", {"room_id": "ao", "client_message_id": "source", "body": "@PLA status?"}, principal="pc1"
+    )["result"]
+    mention = source["mentions"][0]
+    message = source["message"]
+    handler = build_handler(operations, peer_principal="pc1", peer_agent_principals={"pla"})
+    context = SimpleNamespace(
+        metadata={
+            "agent_room": {
+                "contract_version": "1",
+                "operation": "room.post",
+                "source_principal": "pla",
+                "payload": {
+                    "room_id": "ao",
+                    "client_message_id": f"mention-reply:{mention['id']}",
+                    "body": "PLA reply",
+                    "thread_id": message["thread_id"],
+                    "reply_to_message_id": message["id"],
+                    "completes_mention_id": mention["id"],
+                },
+            }
+        }
+    )
+
+    parts = await handler(context)
+    result = MessageToDict(parts[0])["data"]["result"]
+
+    assert result["message"]["author_principal"] == "pla"
+    assert result["message"]["author_kind"] == "agent"
+    assert store.mention(mention["id"])["status"] == "completed"
+    assert store.mention(mention["id"])["reply_message_id"] == result["message"]["id"]
+
+    duplicate = SimpleNamespace(
+        metadata={
+            "agent_room": {
+                **context.metadata["agent_room"],
+                "payload": {
+                    **context.metadata["agent_room"]["payload"],
+                    "client_message_id": "different-reply-id",
+                    "body": "second PLA reply",
+                },
+            }
+        }
+    )
+    with pytest.raises(RoomConflict, match="completed by a different reply"):
+        await handler(duplicate)
+    messages = store.sync(room_id="ao", after=0, limit=100)["messages"]
+    assert [item["body"] for item in messages if item["author_principal"] == "pla"] == ["PLA reply"]
+
+    forged = SimpleNamespace(metadata={"agent_room": {**context.metadata["agent_room"], "source_principal": "hermes"}})
+    with pytest.raises(PermissionError, match="not authorized for peer"):
+        await handler(forged)
 
 
 @pytest.mark.asyncio

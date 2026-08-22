@@ -1,11 +1,11 @@
 id: agent-room
 name: Agent Room Backend
-version: 0.6.0
+version: 0.7.0
 description: >-
   Durable model-free shared-room owner and deterministic peer client for protoAgent: subject rooms,
   lifecycle, bounded history, indexed search, ordered messages, stable
-  client-message deduplication, cursors, membership, mention-only named-delegate
-  replies, a gated local API, and deterministic Room operations.
+  client-message deduplication, cursors, membership, local and roster-bound remote
+  mention replies, a gated local API, and deterministic Room operations.
 enabled: false
 repository: https://github.com/RomeoRaven/agent-room-plugin
 min_protoagent_version: "0.142.1"
@@ -16,6 +16,7 @@ config:
   mode: owner
   local_principal: operator
   peer_principal: ""
+  peer_agent_principals: []
   peer_url: ""
   peer_token_file: ""
   peer_ca_file: ""

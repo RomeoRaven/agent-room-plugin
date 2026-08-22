@@ -169,4 +169,4 @@ This avoids pretending that unrelated per-agent histories were once a single con
 
 The public plugin main branch includes durable subject rooms, exact local mention delivery, bounded agent chains, lifecycle and search, and deterministic client mode.
 
-Roster-backed remote agent replies are the active development slice. The code path is undergoing installed-host acceptance before it is proposed for merge. See [the Agent Room plan](agent-room-plan.md) for the full status and remaining gates.
+Roster-backed remote agent replies are the active development slice. The candidate has passed installed-host acceptance and is being prepared for public merge. It remains development work until the merged revision passes the same minimum reply and recovery check. See [the Agent Room plan](agent-room-plan.md) for the full status and remaining gates.

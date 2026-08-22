@@ -125,6 +125,44 @@ def test_register_client_mode_mounts_proxy_and_reconcile_without_owner_database(
     assert registry.handlers == {}
 
 
+def test_register_client_roster_target_adds_live_resolver_and_durable_delivery_surface(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path, peer=False)
+    config.update(
+        {
+            "mode": "client",
+            "peer_url": "https://room-owner.example/a2a",
+            "peer_token_file": str(tmp_path / "peer.token"),
+            "dispatch_targets": {
+                "pla": {
+                    "agent_code": "PLA",
+                    "delegate": "pla-room",
+                    "resolver": {"command": sys.executable, "args": ["resolver-adapter.py"], "timeout_seconds": 5},
+                }
+            },
+        }
+    )
+    (tmp_path / "peer.token").write_text("secret\n")
+    registry = FakeRegistry(config)
+
+    plugin.register(registry)
+
+    assert [surface["name"] for surface in registry.surfaces] == [
+        "peer-reconciliation",
+        "client-mention-delivery",
+    ]
+
+
+def test_register_rejects_peer_agent_attestation_for_non_agent_member(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path)
+    config["peer_agent_principals"] = ["pc1"]
+    registry = FakeRegistry(config)
+
+    with pytest.raises(ValueError, match="peer agent principal must be a configured agent member"):
+        plugin.register(registry)
+
+
 def test_register_configured_dispatch_target_adds_one_worker_surface(tmp_path):
     plugin = _load_plugin()
     config = _config(tmp_path, peer=False)
