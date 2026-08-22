@@ -164,6 +164,8 @@ class ClientState:
                     room_id TEXT NOT NULL,
                     client_message_id TEXT NOT NULL,
                     body TEXT NOT NULL,
+                    thread_id TEXT,
+                    reply_to_message_id TEXT,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (room_id, client_message_id)
                 );
@@ -177,6 +179,11 @@ class ClientState:
             columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(cursors)")}
             if "remote_sequence" not in columns:
                 conn.execute("ALTER TABLE cursors ADD COLUMN remote_sequence INTEGER NOT NULL DEFAULT 0")
+            pending_columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(pending_posts)")}
+            if "thread_id" not in pending_columns:
+                conn.execute("ALTER TABLE pending_posts ADD COLUMN thread_id TEXT")
+            if "reply_to_message_id" not in pending_columns:
+                conn.execute("ALTER TABLE pending_posts ADD COLUMN reply_to_message_id TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path)
@@ -217,7 +224,8 @@ class ClientState:
     def pending(self, room_id: str) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT client_message_id,body,created_at FROM pending_posts WHERE room_id=? ORDER BY created_at",
+                """SELECT client_message_id,body,created_at,thread_id,reply_to_message_id
+                   FROM pending_posts WHERE room_id=? ORDER BY created_at""",
                 (room_id,),
             ).fetchall()
         return [
@@ -226,36 +234,51 @@ class ClientState:
                 "client_message_id": row[0],
                 "body": row[1],
                 "created_at": row[2],
+                "thread_id": row[3],
+                "reply_to_message_id": row[4],
                 "status": "pending",
             }
             for row in rows
         ]
 
-    def queue_post(self, room_id: str, client_message_id: str, body: str) -> dict:
+    def queue_post(
+        self,
+        room_id: str,
+        client_message_id: str,
+        body: str,
+        *,
+        thread_id: str | None = None,
+        reply_to_message_id: str | None = None,
+    ) -> dict:
         message_id = str(client_message_id or "").strip()
         text = str(body or "").strip()
         if not message_id or not text:
             raise ValueError("client_message_id and body are required")
         with self._connect() as conn:
             existing = conn.execute(
-                "SELECT body,created_at FROM pending_posts WHERE room_id=? AND client_message_id=?",
+                """SELECT body,created_at,thread_id,reply_to_message_id FROM pending_posts
+                   WHERE room_id=? AND client_message_id=?""",
                 (room_id, message_id),
             ).fetchone()
             if existing:
-                if str(existing[0]) != text:
+                if (str(existing[0]), existing[2], existing[3]) != (text, thread_id, reply_to_message_id):
                     raise ClientConflict("client_message_id was already queued with different content")
                 created_at = str(existing[1])
             else:
                 created_at = datetime.now(UTC).isoformat()
                 conn.execute(
-                    "INSERT INTO pending_posts(room_id,client_message_id,body,created_at) VALUES(?,?,?,?)",
-                    (room_id, message_id, text, created_at),
+                    """INSERT INTO pending_posts(
+                         room_id,client_message_id,body,thread_id,reply_to_message_id,created_at
+                       ) VALUES(?,?,?,?,?,?)""",
+                    (room_id, message_id, text, thread_id, reply_to_message_id, created_at),
                 )
         return {
             "room_id": room_id,
             "client_message_id": message_id,
             "body": text,
             "created_at": created_at,
+            "thread_id": thread_id,
+            "reply_to_message_id": reply_to_message_id,
             "status": "pending",
         }
 
@@ -314,13 +337,23 @@ class ClientRoomService:
             "client_message_id": str(payload.get("client_message_id") or "").strip(),
             "body": str(payload.get("body") or "").strip(),
         }
+        for field in ("thread_id", "reply_to_message_id"):
+            value = str(payload.get(field) or "").strip()
+            if value:
+                outbound[field] = value
         if not outbound["client_message_id"] or not outbound["body"]:
             raise ValueError("client_message_id and body are required")
         try:
             result = self._validated_post(self.peer.execute("room.post", outbound), outbound)
         except PeerUnavailable:
             self.owner_online = False
-            pending = self.state.queue_post(room, outbound["client_message_id"], outbound["body"])
+            pending = self.state.queue_post(
+                room,
+                outbound["client_message_id"],
+                outbound["body"],
+                thread_id=outbound.get("thread_id"),
+                reply_to_message_id=outbound.get("reply_to_message_id"),
+            )
             return {
                 "contract_version": CONTRACT_VERSION,
                 "operation": "room.post",
@@ -387,6 +420,9 @@ class ClientRoomService:
                 "client_message_id": pending["client_message_id"],
                 "body": pending["body"],
             }
+            for field in ("thread_id", "reply_to_message_id"):
+                if pending.get(field):
+                    outbound[field] = pending[field]
             self._validated_post(self.peer.execute("room.post", outbound), outbound)
             self.state.remove_pending("ao", pending["client_message_id"])
             reconciled += 1
@@ -408,7 +444,7 @@ class PeerReconciler:
     async def _run(self) -> None:
         while True:
             try:
-                self.service.reconcile_once()
+                await asyncio.to_thread(self.service.reconcile_once)
             except PeerUnavailable:
                 self.service.owner_online = False
             await asyncio.sleep(self.interval)

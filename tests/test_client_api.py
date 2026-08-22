@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import time
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from client import ClientRoomService, ClientState, PeerUnavailable
+from client import ClientRoomService, ClientState, PeerReconciler, PeerUnavailable
 from client_api import build_client_router
 
 
@@ -95,8 +98,14 @@ def test_offline_post_survives_restart_and_reconciles_exactly_once(tmp_path):
     client = _client(tmp_path, peer)
     path = "/api/plugins/agent-room/rooms/ao/post"
 
-    queued = client.post(path, json={"client_message_id": "offline-1", "body": "Queued once"})
-    retried = client.post(path, json={"client_message_id": "offline-1", "body": "Queued once"})
+    offline_payload = {
+        "client_message_id": "offline-1",
+        "body": "Queued once",
+        "thread_id": "thread-offline",
+        "reply_to_message_id": "canonical-4",
+    }
+    queued = client.post(path, json=offline_payload)
+    retried = client.post(path, json=offline_payload)
     conflict = client.post(path, json={"client_message_id": "offline-1", "body": "Different"})
     offline_sync = client.get("/api/plugins/agent-room/rooms/ao/messages?after=0&limit=50")
     offline_members = client.get("/api/plugins/agent-room/rooms/ao/members")
@@ -120,7 +129,15 @@ def test_offline_post_survives_restart_and_reconciles_exactly_once(tmp_path):
     assert restarted.reconcile_once() == 0
     assert restarted.state.pending("ao") == []
     posts = [payload for operation, payload in peer.calls if operation == "room.post"]
-    assert posts == [{"room_id": "ao", "client_message_id": "offline-1", "body": "Queued once"}]
+    assert posts == [
+        {
+            "room_id": "ao",
+            "client_message_id": "offline-1",
+            "body": "Queued once",
+            "thread_id": "thread-offline",
+            "reply_to_message_id": "canonical-4",
+        }
+    ]
 
 
 def test_offline_ack_survives_restart_and_reconciles_monotonically(tmp_path):
@@ -168,3 +185,48 @@ def test_reconcile_keeps_pending_post_until_peer_confirms_matching_canonical_mes
         service.reconcile_once()
 
     assert [row["client_message_id"] for row in state.pending("ao")] == ["pending-1"]
+
+
+def test_client_post_preserves_thread_and_reply_links(tmp_path):
+    peer = FakePeer()
+    service = ClientRoomService(ClientState(tmp_path / "client.db"), peer)
+
+    service.post(
+        "ao",
+        {
+            "client_message_id": "reply-1",
+            "body": "Nested reply",
+            "thread_id": "thread-7",
+            "reply_to_message_id": "canonical-7",
+        },
+    )
+
+    assert peer.calls[0] == (
+        "room.post",
+        {
+            "room_id": "ao",
+            "client_message_id": "reply-1",
+            "body": "Nested reply",
+            "thread_id": "thread-7",
+            "reply_to_message_id": "canonical-7",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_reconciler_keeps_blocking_peer_work_off_the_host_event_loop(tmp_path):
+    class SlowService:
+        owner_online = True
+
+        def reconcile_once(self):
+            time.sleep(0.15)
+            return 0
+
+    reconciler = PeerReconciler(SlowService(), interval=60)
+    started = time.monotonic()
+    await reconciler.start()
+    await asyncio.sleep(0.02)
+    elapsed = time.monotonic() - started
+    await reconciler.stop()
+
+    assert elapsed < 0.08
