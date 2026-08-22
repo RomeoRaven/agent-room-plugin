@@ -56,6 +56,12 @@ def build_handler(operations: RoomOperations, *, peer_principal: str):
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
             raise ValueError("agent_room payload must be an object")
+        if operation == "room.sync":
+            local_fields = {field for field in ("before", "around", "history") if field in payload}
+            if local_fields:
+                field = sorted(local_fields)[0]
+                raise ValueError(f"unsupported agent-room transport payload field {field!r}")
+            payload = {**payload, "after": int(payload.get("after") or 0)}
         result = operations.execute(operation, payload, principal=principal)
         return [_data_part(result)]
 
