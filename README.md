@@ -80,7 +80,7 @@ pytest -q
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
 | Linux | Tested | v0.6 candidate: owner/client plugin suite and native protoAgent client-mode UI build/E2E |
-| Windows | Pending live qualification | Step 7A isolated PC1 dev acceptance is required before release disposition |
+| Windows | Tested | v0.6 candidate: native Ruff/format and 74-test suite plus isolated live owner/client offline/restart acceptance |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.
