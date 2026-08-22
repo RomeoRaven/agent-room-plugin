@@ -324,8 +324,14 @@ class ClientRoomService:
             not isinstance(message, dict)
             or message.get("room_id") != outbound["room_id"]
             or message.get("client_message_id") != outbound["client_message_id"]
+            or message.get("body") != outbound["body"]
             or not str(message.get("id") or "").strip()
             or int(message.get("sequence") or 0) <= 0
+            or ("thread_id" in outbound and message.get("thread_id") != outbound["thread_id"])
+            or (
+                "reply_to_message_id" in outbound
+                and message.get("reply_to_message_id") != outbound["reply_to_message_id"]
+            )
         ):
             raise ValueError("peer did not confirm a matching canonical message")
         return result

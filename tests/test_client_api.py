@@ -31,8 +31,8 @@ class FakePeer:
                     "author_principal": "pc1",
                     "author_kind": "human",
                     "body": payload["body"],
-                    "thread_id": "canonical-1",
-                    "reply_to_message_id": None,
+                    "thread_id": payload.get("thread_id") or "canonical-1",
+                    "reply_to_message_id": payload.get("reply_to_message_id"),
                     "created_at": "2026-08-22T00:00:00+00:00",
                 },
             }
@@ -185,6 +185,36 @@ def test_reconcile_keeps_pending_post_until_peer_confirms_matching_canonical_mes
         service.reconcile_once()
 
     assert [row["client_message_id"] for row in state.pending("ao")] == ["pending-1"]
+
+
+def test_post_rejects_canonical_confirmation_that_drops_thread_links(tmp_path):
+    class LinkDroppingPeer:
+        def execute(self, operation, payload):
+            return {
+                "created": True,
+                "message": {
+                    "id": "canonical-8",
+                    "room_id": "ao",
+                    "sequence": 8,
+                    "client_message_id": payload["client_message_id"],
+                    "body": payload["body"],
+                    "thread_id": "canonical-8",
+                    "reply_to_message_id": None,
+                },
+            }
+
+    service = ClientRoomService(ClientState(tmp_path / "client.db"), LinkDroppingPeer())
+
+    with pytest.raises(ValueError, match="matching canonical message"):
+        service.post(
+            "ao",
+            {
+                "client_message_id": "reply-1",
+                "body": "Nested reply",
+                "thread_id": "thread-7",
+                "reply_to_message_id": "canonical-7",
+            },
+        )
 
 
 def test_client_post_preserves_thread_and_reply_links(tmp_path):
