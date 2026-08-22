@@ -4,6 +4,13 @@ Durable shared-room backend for [protoAgent](https://github.com/protoLabsAI/prot
 
 This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fleet Room surface rather than shipping a second chat UI.
 
+## Why this exists
+
+Fleet is built to run and operate many agents. Agent Room is built to give people and agents one durable shared conversation with exact mentions, attributed replies, search, and recovery.
+
+- [Fleet Room and Agent Room](docs/fleet-room-vs-agent-room.md) explains the product boundary and why Agent Room is not a Fleet broadcast feature.
+- [Agent Room plan](docs/agent-room-plan.md) shows the architecture, completed work, active roster-reply slice, remaining acceptance, and definition of done.
+
 ## Current slice
 
 - Multiple subject rooms with migration-safe Agent Organization default (`ao`)
