@@ -6,10 +6,10 @@ This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fl
 
 ## Why this exists
 
-Fleet is built to run and operate many agents. Agent Room is built to give people and agents one durable shared conversation with exact mentions, attributed replies, search, and recovery.
+Fleet runs and operates many agents. Agent Room supplies the durable conversation layer that Fleet Room lacked: one canonical transcript, exact mentions, attributed replies, search, and recovery. The permanent direction is one Fleet Room chat product backed by separate Fleet process authority and Agent Room transcript authority.
 
-- [Fleet Room and Agent Room](docs/fleet-room-vs-agent-room.md) explains the product boundary and why Agent Room is not a Fleet broadcast feature.
-- [Agent Room plan](docs/agent-room-plan.md) shows the architecture, completed work, active roster-reply slice, remaining acceptance, and definition of done.
+- [Fleet Room and the Agent Room backend](docs/fleet-room-vs-agent-room.md) explains the unified product surface and separate internal responsibilities.
+- [Agent Room plan](docs/agent-room-plan.md) shows the architecture, completed work, federation-route migration, remaining acceptance, and definition of done.
 
 ## Current slice
 
@@ -31,7 +31,7 @@ Fleet is built to run and operate many agents. Agent Room is built to give peopl
 - Restart-safe no-replay handling for ambiguous in-flight delegate turns
 - Persisted agent-origin chain, parent mention, hop count, cycle/hop/rate blocking
 - Sanitized mention delivery state returned through `room.sync`
-- Optional deterministic client mode for one fixed S1-owned AO room
+- Optional deterministic client mode for one fixed remote-owned AO room
 - Directional TLS A2A proxy for post/sync/ack/members with no canonical-message cache
 - SQLite-backed pending posts, acknowledgement/delivery cursors, and local mention-dispatch claims only
 - Stable-id offline post reconciliation and explicit owner-offline/pending UI state
