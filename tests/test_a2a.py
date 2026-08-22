@@ -7,7 +7,7 @@ from google.protobuf.json_format import MessageToDict
 
 from transport import MIME_TYPE, build_handler
 from operations import RoomOperations
-from store import RoomStore
+from store import RoomConflict, RoomStore
 
 
 def _handler(tmp_path):
@@ -111,6 +111,23 @@ async def test_a2a_handler_accepts_allowlisted_host_attested_agent_reply_and_com
     assert result["message"]["author_kind"] == "agent"
     assert store.mention(mention["id"])["status"] == "completed"
     assert store.mention(mention["id"])["reply_message_id"] == result["message"]["id"]
+
+    duplicate = SimpleNamespace(
+        metadata={
+            "agent_room": {
+                **context.metadata["agent_room"],
+                "payload": {
+                    **context.metadata["agent_room"]["payload"],
+                    "client_message_id": "different-reply-id",
+                    "body": "second PLA reply",
+                },
+            }
+        }
+    )
+    with pytest.raises(RoomConflict, match="completed by a different reply"):
+        await handler(duplicate)
+    messages = store.sync(room_id="ao", after=0, limit=100)["messages"]
+    assert [item["body"] for item in messages if item["author_principal"] == "pla"] == ["PLA reply"]
 
     forged = SimpleNamespace(metadata={"agent_room": {**context.metadata["agent_room"], "source_principal": "hermes"}})
     with pytest.raises(PermissionError, match="not authorized for peer"):

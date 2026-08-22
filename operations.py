@@ -114,12 +114,7 @@ class RoomOperations:
             target = self.dispatch_targets.get(str(member["principal"]).casefold())
             if target is None:
                 continue
-            if (
-                source is not None
-                and source["kind"] == "agent"
-                and target.get("remote_peer")
-                and target.get("allow_agent_sources") is not True
-            ):
+            if source is not None and source["kind"] == "agent" and target.get("remote_peer"):
                 continue
             token = str(member["mention_token"])
             for match in re.finditer(rf"(?<!\w){re.escape(token)}(?!\w)", body, flags=re.IGNORECASE):
@@ -259,15 +254,7 @@ class RoomOperations:
         elif operation == "room.post":
             body = _string(payload, "body", max_length=20000)
             completion_id = _optional_string(payload, "completes_mention_id", max_length=200)
-            completion = self.store.mention(completion_id) if completion_id else None
             reply_to_message_id = _optional_string(payload, "reply_to_message_id", max_length=200)
-            if completion is not None and (
-                completion["room_id"] != room_id
-                or completion["target_principal"] != bound_principal
-                or completion["source_message_id"] != reply_to_message_id
-                or not str(completion["delegate_name"]).startswith("remote:")
-            ):
-                raise PermissionError("remote mention completion does not match the attested reply")
             member = next(
                 member for member in self.store.members(room_id=room_id) if member["principal"] == bound_principal
             )
@@ -280,19 +267,12 @@ class RoomOperations:
                 thread_id=_optional_string(payload, "thread_id", max_length=200),
                 reply_to_message_id=reply_to_message_id,
                 mentions=self.resolve_mentions(room_id=room_id, principal=bound_principal, body=body),
+                completes_remote_mention_id=completion_id,
             )
             result.setdefault("mentions", [])
             result["mentions"] = self._public_mentions(result["mentions"])
-            if completion_id:
-                result["completed_mention"] = self._public_mentions(
-                    [
-                        self.store.complete_remote_mention(
-                            completion_id,
-                            target_principal=bound_principal,
-                            reply_message_id=result["message"]["id"],
-                        )
-                    ]
-                )[0]
+            if result.get("completed_mention"):
+                result["completed_mention"] = self._public_mentions([result["completed_mention"]])[0]
         elif operation == "room.sync":
             result = self.store.sync(
                 room_id=room_id,

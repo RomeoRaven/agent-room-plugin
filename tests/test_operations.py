@@ -111,7 +111,7 @@ def test_remote_target_creates_canonical_pending_mention_without_local_worker_cl
             },
         ],
     )
-    operations = RoomOperations(store, dispatch_targets={"pla": {"remote_peer": "pc1", "allow_agent_sources": False}})
+    operations = RoomOperations(store, dispatch_targets={"pla": {"remote_peer": "pc1", "allow_agent_sources": True}})
 
     posted = operations.execute(
         "room.post", {"room_id": "ao", "client_message_id": "human-pla", "body": "@PLA status?"}, principal="pc1"

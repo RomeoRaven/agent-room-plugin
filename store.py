@@ -467,6 +467,7 @@ class RoomStore:
         thread_id: str | None = None,
         reply_to_message_id: str | None = None,
         mentions: list[dict] | None = None,
+        completes_remote_mention_id: str | None = None,
     ) -> dict:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -482,6 +483,21 @@ class RoomStore:
             ).fetchone()
             if member is None or not bool(member["can_post"]):
                 raise PermissionError(f"principal {principal!r} is not a posting member of room {room_id!r}")
+            completed_mention = None
+            if completes_remote_mention_id:
+                completed_mention = conn.execute(
+                    "SELECT * FROM mentions WHERE id=?",
+                    (completes_remote_mention_id,),
+                ).fetchone()
+                if completed_mention is None:
+                    raise KeyError(f"unknown mention {completes_remote_mention_id!r}")
+                if (
+                    completed_mention["room_id"] != room_id
+                    or completed_mention["target_principal"] != principal
+                    or completed_mention["source_message_id"] != reply_to_message_id
+                    or not str(completed_mention["delegate_name"]).startswith("remote:")
+                ):
+                    raise PermissionError("remote mention completion does not match the attested reply")
             existing = conn.execute(
                 """SELECT * FROM messages
                    WHERE room_id=? AND client_principal=? AND client_message_id=?""",
@@ -496,6 +512,21 @@ class RoomStore:
                 )
                 if not same_content:
                     raise RoomConflict("client_message_id already exists with different content")
+                if completed_mention is not None:
+                    if completed_mention["status"] == "completed":
+                        if completed_mention["reply_message_id"] != existing["id"]:
+                            raise RoomConflict("remote mention was completed by a different reply")
+                    elif completed_mention["status"] == "pending":
+                        conn.execute(
+                            """UPDATE mentions SET status='completed',reply_message_id=?,error=NULL,updated_at=?
+                               WHERE id=? AND status='pending'""",
+                            (existing["id"], _now(), completed_mention["id"]),
+                        )
+                    else:
+                        raise RoomConflict("remote mention is not pending")
+                    completed_mention = conn.execute(
+                        "SELECT * FROM mentions WHERE id=?", (completed_mention["id"],)
+                    ).fetchone()
                 mention_rows = conn.execute(
                     "SELECT * FROM mentions WHERE source_message_id=? ORDER BY position, created_at, id",
                     (existing["id"],),
@@ -507,10 +538,17 @@ class RoomStore:
                 }
                 if mention_rows:
                     result["mentions"] = [self._mention(row) for row in mention_rows]
+                if completed_mention is not None:
+                    result["completed_mention"] = self._mention(completed_mention)
                 return result
 
             if room["status"] != "active":
                 raise RoomConflict("archived room is read-only")
+            if completed_mention is not None:
+                if completed_mention["status"] == "completed":
+                    raise RoomConflict("remote mention was completed by a different reply")
+                if completed_mention["status"] != "pending":
+                    raise RoomConflict("remote mention is not pending")
             reply_target = None
             if reply_to_message_id:
                 reply_target = conn.execute(
@@ -595,6 +633,17 @@ class RoomStore:
                         mention_created_at,
                     ),
                 )
+            if completed_mention is not None:
+                changed = conn.execute(
+                    """UPDATE mentions SET status='completed',reply_message_id=?,error=NULL,updated_at=?
+                       WHERE id=? AND status='pending'""",
+                    (message_id, created_at, completed_mention["id"]),
+                ).rowcount
+                if changed != 1:
+                    raise RoomConflict("remote mention is not pending")
+                completed_mention = conn.execute(
+                    "SELECT * FROM mentions WHERE id=?", (completed_mention["id"],)
+                ).fetchone()
             conn.execute("UPDATE rooms SET updated_at=? WHERE id=?", (created_at, room_id))
             row = conn.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone()
             mention_rows = conn.execute(
@@ -608,6 +657,8 @@ class RoomStore:
         }
         if mention_rows:
             result["mentions"] = [self._mention(mention_row) for mention_row in mention_rows]
+        if completed_mention is not None:
+            result["completed_mention"] = self._mention(completed_mention)
         return result
 
     def pending_mentions(self, *, limit: int = 100) -> list[dict]:
@@ -731,30 +782,6 @@ class RoomStore:
                 raise RoomConflict("mention reply is not ready for completion")
             row = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
         return self._mention(row)
-
-    def complete_remote_mention(self, mention_id: str, *, target_principal: str, reply_message_id: str) -> dict:
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
-            if row is None:
-                raise KeyError(f"unknown mention {mention_id!r}")
-            if row["target_principal"] != target_principal or not str(row["delegate_name"]).startswith("remote:"):
-                raise PermissionError("remote mention completion does not match the attested target")
-            if row["status"] == "completed":
-                if row["reply_message_id"] != reply_message_id:
-                    raise RoomConflict("remote mention was completed by a different reply")
-                conn.commit()
-                return self._mention(row)
-            if row["status"] != "pending":
-                raise RoomConflict("remote mention is not pending")
-            conn.execute(
-                """UPDATE mentions SET status='completed', reply_message_id=?, error=NULL, updated_at=?
-                   WHERE id=? AND status='pending'""",
-                (reply_message_id, _now(), mention_id),
-            )
-            updated = conn.execute("SELECT * FROM mentions WHERE id=?", (mention_id,)).fetchone()
-            conn.commit()
-        return self._mention(updated)
 
     def fail_mention(self, mention_id: str, error: str) -> dict:
         detail = str(error or "mention dispatch failed").strip()[:1000]
