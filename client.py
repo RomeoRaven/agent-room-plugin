@@ -187,14 +187,16 @@ class ClientState:
         return int(row[0]) if row else 0
 
     def set_cursor(self, room_id: str, sequence: int) -> int:
-        value = max(self.cursor(room_id), int(sequence))
+        requested = max(0, int(sequence))
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO cursors(room_id,last_sequence) VALUES(?,?)
-                   ON CONFLICT(room_id) DO UPDATE SET last_sequence=excluded.last_sequence""",
-                (room_id, value),
+                """INSERT INTO cursors(room_id,last_sequence,remote_sequence) VALUES(?,?,0)
+                   ON CONFLICT(room_id) DO UPDATE SET
+                     last_sequence=MAX(cursors.last_sequence,excluded.last_sequence)""",
+                (room_id, requested),
             )
-        return value
+            value = conn.execute("SELECT last_sequence FROM cursors WHERE room_id=?", (room_id,)).fetchone()[0]
+        return int(value)
 
     def pending_ack(self, room_id: str) -> int | None:
         with self._connect() as conn:
@@ -292,6 +294,19 @@ class ClientRoomService:
             ],
         }
 
+    @staticmethod
+    def _validated_post(result: dict, outbound: dict) -> dict:
+        message = result.get("message") if isinstance(result, dict) else None
+        if (
+            not isinstance(message, dict)
+            or message.get("room_id") != outbound["room_id"]
+            or message.get("client_message_id") != outbound["client_message_id"]
+            or not str(message.get("id") or "").strip()
+            or int(message.get("sequence") or 0) <= 0
+        ):
+            raise ValueError("peer did not confirm a matching canonical message")
+        return result
+
     def post(self, room_id: str, payload: dict) -> dict:
         room = self._room(room_id)
         outbound = {
@@ -302,7 +317,7 @@ class ClientRoomService:
         if not outbound["client_message_id"] or not outbound["body"]:
             raise ValueError("client_message_id and body are required")
         try:
-            result = self.peer.execute("room.post", outbound)
+            result = self._validated_post(self.peer.execute("room.post", outbound), outbound)
         except PeerUnavailable:
             self.owner_online = False
             pending = self.state.queue_post(room, outbound["client_message_id"], outbound["body"])
@@ -355,21 +370,24 @@ class ClientRoomService:
 
     def members(self, room_id: str) -> dict:
         room = self._room(room_id)
-        result = self.peer.execute("room.members", {"room_id": room})
+        try:
+            result = self.peer.execute("room.members", {"room_id": room})
+        except PeerUnavailable:
+            self.owner_online = False
+            result = {"members": [], "owner_online": False}
+            return {"contract_version": CONTRACT_VERSION, "operation": "room.members", "result": result}
         self.owner_online = True
         return {"contract_version": CONTRACT_VERSION, "operation": "room.members", "result": result}
 
     def reconcile_once(self) -> int:
         reconciled = 0
         for pending in self.state.pending("ao"):
-            self.peer.execute(
-                "room.post",
-                {
-                    "room_id": "ao",
-                    "client_message_id": pending["client_message_id"],
-                    "body": pending["body"],
-                },
-            )
+            outbound = {
+                "room_id": "ao",
+                "client_message_id": pending["client_message_id"],
+                "body": pending["body"],
+            }
+            self._validated_post(self.peer.execute("room.post", outbound), outbound)
             self.state.remove_pending("ao", pending["client_message_id"])
             reconciled += 1
         desired = self.state.pending_ack("ao")

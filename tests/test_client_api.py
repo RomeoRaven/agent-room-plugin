@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from client import ClientRoomService, ClientState, PeerUnavailable
 from client_api import build_client_router
@@ -98,6 +99,7 @@ def test_offline_post_survives_restart_and_reconciles_exactly_once(tmp_path):
     retried = client.post(path, json={"client_message_id": "offline-1", "body": "Queued once"})
     conflict = client.post(path, json={"client_message_id": "offline-1", "body": "Different"})
     offline_sync = client.get("/api/plugins/agent-room/rooms/ao/messages?after=0&limit=50")
+    offline_members = client.get("/api/plugins/agent-room/rooms/ao/members")
 
     assert queued.status_code == 200 and queued.json()["result"]["pending"] is True
     assert retried.status_code == 200 and retried.json()["result"] == queued.json()["result"]
@@ -105,6 +107,10 @@ def test_offline_post_survives_restart_and_reconciles_exactly_once(tmp_path):
     assert offline_sync.status_code == 200
     assert offline_sync.json()["result"]["owner_online"] is False
     assert [row["client_message_id"] for row in offline_sync.json()["result"]["pending_posts"]] == ["offline-1"]
+    assert offline_members.status_code == 200 and offline_members.json()["result"] == {
+        "members": [],
+        "owner_online": False,
+    }
 
     restarted = ClientRoomService(ClientState(tmp_path / "client.db"), peer)
     assert [row["client_message_id"] for row in restarted.state.pending("ao")] == ["offline-1"]
@@ -134,3 +140,31 @@ def test_offline_ack_survives_restart_and_reconciles_monotonically(tmp_path):
     assert restarted.reconcile_once() == 0
     acks = [payload for operation, payload in peer.calls if operation == "room.ack"]
     assert acks == [{"room_id": "ao", "sequence": 9}]
+
+
+def test_cursor_upsert_remains_monotonic_when_callers_observe_stale_state(tmp_path):
+    class StaleReaderState(ClientState):
+        def cursor(self, room_id):
+            return 0
+
+    state = StaleReaderState(tmp_path / "client.db")
+
+    state.set_cursor("ao", 10)
+    state.set_cursor("ao", 9)
+
+    assert ClientState.cursor(state, "ao") == 10
+
+
+def test_reconcile_keeps_pending_post_until_peer_confirms_matching_canonical_message(tmp_path):
+    class MalformedPeer:
+        def execute(self, operation, payload):
+            return {}
+
+    state = ClientState(tmp_path / "client.db")
+    state.queue_post("ao", "pending-1", "Keep me")
+    service = ClientRoomService(state, MalformedPeer())
+
+    with pytest.raises(ValueError, match="matching canonical message"):
+        service.reconcile_once()
+
+    assert [row["client_message_id"] for row in state.pending("ao")] == ["pending-1"]
