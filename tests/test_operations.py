@@ -54,6 +54,17 @@ def test_versioned_operations_share_one_bound_principal_contract(tmp_path):
     assert {m["principal"] for m in members["result"]["members"]} == {"dennis", "pc1"}
 
 
+def test_members_identify_only_configured_dispatch_targets_as_mentionable(tmp_path):
+    store = _service(tmp_path).store
+    operations = RoomOperations(store, dispatch_targets={"pc1": {"delegate": "pc1_local"}})
+
+    result = operations.execute("room.members", {"room_id": "ao"}, principal="dennis")
+    members = {member["principal"]: member for member in result["result"]["members"]}
+
+    assert members["pc1"]["mentionable"] is True
+    assert members["dennis"]["mentionable"] is False
+
+
 def test_operations_reject_wire_identity_and_nonmembers(tmp_path):
     operations = _service(tmp_path)
 

@@ -11,6 +11,8 @@ Version 0.3.x owns one fixed `ao` room and four model-free operations:
 - `room.ack` — persist a monotonic member cursor;
 - `room.members` — return room-visible membership.
 
+`room.members` adds a derived `mentionable` boolean. It is true only when the member principal is bound to a configured local dispatch target. It does not claim runtime presence or expose the delegate route name.
+
 The plugin exposes a bearer-gated local router at `/api/plugins/agent-room` and, only when `peer_principal` is configured as a member, advertises/handles deterministic A2A skill `agent-room-v1`.
 
 When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. One source message may address multiple explicit targets in token order; one source/target pair remains unique. The worker invokes only through `PluginHost.invoke_delegate`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP/A2A.
@@ -43,6 +45,21 @@ Authorized agent replies may create child mentions. Every mention persists its r
 - A restart during a possible delegate invocation becomes `ambiguous` and is never automatically replayed; cached `reply_ready` text may be posted idempotently without another invocation.
 - Host imports must stay lazy or absent so tests run without a protoAgent checkout.
 - Keep manifest and pyproject versions identical.
+
+## Local-first and optional peer ownership
+
+The standalone, single-instance Room is the primary complete product path. `peer_principal` defaults empty; local Room storage, native UI, and local delegate mentions must remain fully usable without A2A admission or any cross-device configuration.
+
+Keep multi-device concerns outside the local core:
+
+| Concern | Owner |
+|---|---|
+| Canonical messages, membership, cursors, mention records, local dispatch | Agent Room plugin |
+| Navigation, member click, mention picker, recipient guidance, accessible composer | Native protoAgent console |
+| Private route, TLS, directional credentials, advertised URLs, offline outbox, reconciliation | Optional peer/client adapter |
+| Authoritative agent identity and principal-to-runtime binding | Host-local roster adapter |
+
+The conditional `agent-room-v1` A2A handler is only a deterministic adapter over `post`, `sync`, `ack`, and `members`. Do not grow it into route provisioning, credential distribution, retry scheduling, PC1-specific knowledge, or a second Room owner.
 
 ## Gate
 
