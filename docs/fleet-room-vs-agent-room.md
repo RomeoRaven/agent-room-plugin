@@ -1,24 +1,24 @@
-# Fleet Room and Agent Room
+# Fleet Room and the Agent Room backend
 
-Fleet Room and Agent Room look similar because both show agents, accept messages, and live in the protoAgent console. They solve different problems.
+Fleet Room and Agent Room look similar because the Agent Room work began inside the native Fleet Room surface. The lasting distinction is not two competing products. It is two internal authorities behind one chat product.
 
-Fleet Room answers:
+Fleet authority answers:
 
-> Which agents are available, and how do I operate or contact them?
+> Which agents exist, which are running, and how do I operate them?
 
-Agent Room answers:
+Agent Room authority answers:
 
 > What did the group say, who was addressed, and what happened next?
 
-That distinction is the reason Agent Room exists.
+Fleet Room should present both answers in one place.
 
 ## Short version
 
-Fleet is an operational system for running and navigating multiple agents. Agent Room is a durable conversation system shared by people and agents.
+Fleet Room is the operator-facing chat console for a fleet. Agent Room is its durable conversation backend.
 
-Fleet owns agent processes, workspaces, presence, individual consoles, direct messages, and broadcast fan-out. Agent Room owns rooms, membership, ordered messages, exact mentions, threads, delivery state, attributed replies, search, and offline reconciliation.
+Fleet authority owns agent processes, workspaces, presence, individual consoles, and lifecycle. Agent Room authority owns rooms, membership, ordered messages, exact mentions, threads, delivery state, attributed replies, search, and offline reconciliation.
 
-Agent Room reuses the native Fleet Room visual foundation. It does not turn Fleet into a transcript store, and it does not replace Fleet's process-management responsibilities.
+One surface does not require one database or one authority. Fleet process state must not become transcript authority, and Room messages must not become process lifecycle state.
 
 ## Why Fleet Room was not enough
 
@@ -48,7 +48,7 @@ For a real organization room, those details are the product:
 - bounded agent-to-agent handoffs;
 - history that remains searchable after the current working context is reset.
 
-Adding those rules directly to Fleet would mix process lifecycle with conversation authority. Agent Room keeps the boundary explicit.
+Putting this durability in the Agent Room backend lets Fleet Room become the shared chat console without turning the Fleet registry into a transcript store.
 
 ## Capability comparison
 
@@ -70,25 +70,24 @@ Adding those rules directly to Fleet would mix process lifecycle with conversati
 | Room lifecycle | Not owned | Create, rename, archive, restore, and non-destructive Start fresh |
 | Execution authority | Fleet and delegated agents may perform their configured work | Room content is not execution approval |
 
-## What Agent Room reuses
+## How the surface converges
 
-Agent Room did not need another chat application.
+Agent Room did not need another chat application. Fleet Room already existed to show agents and let the operator talk to them. Its broadcast bar was a fan-out because no durable shared transcript sat underneath it.
 
-The native protoAgent console already had a Fleet Room layout with a roster, activity area, composer, responsive styles, and command-palette entry. The Agent Room work reused that foundation and added a native Rooms rail surface.
+The current console is already close to the intended shape:
 
-The current console behavior has three important paths:
+1. The Fleet Room palette entry renders the canonical Agent Room when the backend is available.
+2. Loading, error, and empty-backend states fail closed so text is never broadcast by mistake.
+3. The legacy broadcast view remains only as a compatibility fallback when the Agent Room API is absent.
+4. The first-class Rooms rail exposes the same backend in the main console, but whether that extra navigation entry remains is a separate UX decision.
 
-1. The Rooms rail requires an Agent Room backend. It does not fall back to broadcast behavior.
-2. The existing Fleet Room palette entry renders Agent Room when a canonical room is available.
-3. The legacy Fleet Room remains a compatibility fallback when the Agent Room API is absent.
-
-This reuse keeps the UI native while allowing the backend contracts to stay separate.
+The long-term product direction is Fleet Room backed by Agent Room, not two chat products beside each other. The shared UI can continue evolving while the process and transcript authorities remain separate internally.
 
 ## What remains separate
 
 Some overlap is visual, not architectural.
 
-### Fleet continues to own
+### Fleet authority continues to own
 
 - workspace creation and isolation;
 - archetypes and bundles;
@@ -99,7 +98,7 @@ Some overlap is visual, not architectural.
 - per-agent chat and background work;
 - fleet settings and lifecycle controls.
 
-### Agent Room owns
+### Agent Room backend owns
 
 - canonical rooms and message sequences;
 - room membership and posting policy;
@@ -141,32 +140,39 @@ On the client host, the configured principal is resolved against the live local 
 
 ## Recommendation
 
-Keep Fleet and Agent Room as separate products that share selected UI components.
+Use one Fleet Room chat product backed by two explicit authorities.
 
-- Fleet should remain the place to create, start, stop, inspect, and open agents.
-- Rooms should remain the place to hold shared conversations and exact mention-driven replies.
-- Shared roster cards, presence indicators, composer pieces, and responsive styles can be extracted over time.
-- Fleet process state should not become Room membership authority.
-- Room message state should not become Fleet lifecycle state.
-
-The legacy Fleet Room palette fallback can be retired after Agent Room installation and compatibility policy are stable. Until then, it is a useful transition path. The native Rooms rail should continue to fail closed when the canonical backend is unavailable so a message is never broadcast by mistake.
+- Fleet authority creates, starts, stops, discovers, and opens agents.
+- Agent Room authority stores the shared transcript, exact mentions, threads, delivery state, and attributed replies.
+- Fleet Room presents both without copying either authority's database.
+- Shared roster cards, presence indicators, composer pieces, and responsive styles belong in the unified surface.
+- The legacy fire-and-forget broadcast view remains only as a compatibility fallback while the durable backend is unavailable.
+- The separate Rooms rail is an independent navigation decision. It may remain useful, but it should not define a second chat product.
 
 ## Migration implications
 
 There is no Fleet Room transcript to migrate into Agent Room. Legacy broadcasts were independent sends, and direct messages belong to individual agent chats.
 
-The migration is therefore behavioral:
+The product migration is behavioral:
 
-1. Install and configure Agent Room.
-2. Expose the native Rooms surface.
-3. Use exact mentions for agent wake-up.
-4. Keep Fleet for agent operations and individual consoles.
-5. Retire the legacy broadcast-oriented Room entry after adoption is proven.
+1. Install and configure the Agent Room backend.
+2. Let Fleet Room render the canonical shared transcript when that backend is available.
+3. Use exact mentions for agent wake-up and keep lifecycle controls bound to Fleet authority.
+4. Preserve the legacy broadcast view only during compatibility transition.
+5. Decide the long-term Rooms rail exposure separately from the backend and transport architecture.
 
-This avoids pretending that unrelated per-agent histories were once a single conversation.
+This avoids pretending that unrelated per-agent histories were once a single conversation while preserving Fleet Room as the place people already expect to talk to agents.
+
+## Federation transport direction
+
+The v0.7 client uses a deterministic A2A skill handler because federation credentials cannot call operator-protected plugin `/api` routes. Upstream protoAgent issue [#2747](https://github.com/protoLabsAI/protoAgent/issues/2747#issuecomment-5382744975) confirmed that was the only safe door available and proposed a cleaner permanent seam: `federation_paths`.
+
+Under that proposal, a plugin may lower only its own declared route prefix from operator trust to federation trust. Agent Room client mode can then use a plain authenticated HTTPS POST while the server binds the fixed peer identity. The custom A2A JSON-RPC and task envelope become unnecessary.
+
+The current A2A path remains a proven development bridge. It should be removed after `federation_paths` lands and the plugin migration passes the full Room acceptance. Both transports should not remain as permanent alternatives.
 
 ## Current status
 
-The public plugin main branch includes durable subject rooms, exact local mention delivery, bounded agent chains, lifecycle and search, and deterministic client mode.
+The public plugin main branch includes v0.7.0 durable subject rooms, exact local and roster-backed remote mention delivery, bounded agent chains, lifecycle and search, deterministic client mode, persistent ACP session resume, and restart-safe reply behavior.
 
-Roster-backed remote agent replies are the active development slice. The candidate has passed installed-host acceptance and is being prepared for public merge. It remains development work until the merged revision passes the same minimum reply and recovery check. See [the Agent Room plan](agent-room-plan.md) for the full status and remaining gates.
+Final acceptance began on the A2A development bridge and passed shared parity, client-origin mention of an owner-side agent, owner-origin mention of a client-side agent, and ordered cross-host multiple mentions. It is now paused at `ROOM_REWORK`. The complete bundle must restart after the federation-route migration and three plugin hygiene fixes described in [the Agent Room plan](agent-room-plan.md).

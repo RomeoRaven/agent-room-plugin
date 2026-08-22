@@ -66,14 +66,16 @@ The system distinguishes between work that is safe to retry and work that may al
 
 ## Architecture
 
-Agent Room is split across clear owner surfaces.
+Agent Room is split across clear internal owners behind one Fleet Room chat product.
 
 | Layer | Responsibility |
 |---|---|
-| Native protoAgent console | Rooms rail, room selection, transcript, composer, mention picker, lifecycle controls, search UI, offline and pending state |
+| Native protoAgent Fleet Room | Unified roster and chat surface, transcript, composer, mention picker, lifecycle controls, search, offline and pending state |
+| Optional Rooms rail exposure | A second navigation path to the same backend; retained during development and judged separately from the product and transport architecture |
 | Agent Room plugin, owner mode | Canonical Room database, lifecycle, search, membership, message ordering, mention resolution, delivery state, attributed replies |
 | Agent Room plugin, client mode | Deterministic owner calls, pending-post outbox, acknowledgement and delivery cursors, local mention claims |
-| `agent-room-v1` A2A contract | Model-free `post`, `sync`, `ack`, and `members` operations |
+| Proposed core `federation_paths` seam | Lets a plugin expose only its own declared route prefix to federation trust while keeping operator APIs unavailable |
+| Current `agent-room-v1` A2A contract | Proven development bridge for model-free `post`, `sync`, `ack`, and `members`; removed after federation-route migration |
 | Named delegate host service | Stable per-room, per-thread ACP session dispatch |
 | Host roster adapter | Live principal resolution, owner context, roster hashes, admission state |
 | Deployment owner | Private transport, TLS trust, credentials, service lifecycle, rollback |
@@ -85,6 +87,33 @@ This repository owns the generic durable backend.
 It does not ship another React chat application. The normal UI belongs to protoAgent's native console. Installation-specific agent names, routes, credentials, local paths, and deployment policy remain outside the repository.
 
 Generic console work lives in the protoAgent repository. Generic Room behavior lives here.
+
+## Upstream federation direction
+
+The v0.7 client uses a deterministic A2A skill handler because federation credentials cannot call operator-protected plugin `/api` routes. Upstream protoAgent issue [#2747](https://github.com/protoLabsAI/protoAgent/issues/2747#issuecomment-5382744975) confirmed that this was a real core auth gap and that the A2A bridge was the only safe route available.
+
+The proposed permanent substrate is `federation_paths`, a manifest key modeled after `public_paths`. A plugin may declare which of its own route prefixes lower the auth ceiling from operator to federation trust. Agent Room can then use a normal plugin HTTPS endpoint without giving the client an operator bearer and without wrapping deterministic RPC in an A2A task envelope.
+
+The migration contract is:
+
+1. protoAgent lands and documents `federation_paths` with plugin-prefix validation and trust-tier propagation;
+2. Agent Room declares only its deterministic owner route as federation-accessible;
+3. owner mode binds its fixed configured peer identity server-side;
+4. client mode replaces the A2A JSON-RPC transport with plain authenticated HTTPS;
+5. the old handler and envelope are removed after parity proof;
+6. the full Room acceptance restarts from the first criterion on the migrated revision.
+
+The two transports will not remain as permanent alternatives.
+
+## Release blockers discovered during review
+
+Before the next release or final acceptance:
+
+- remove the installation hostname from the public `capabilities.network` default;
+- replace the misleading stock `0.142.1` compatibility floor with the first upstream revision that actually provides the required seams;
+- enforce a read-only runtime policy for local Room delegates instead of relying only on a prompt that requests no mutation.
+
+Per-peer identity lifecycle remains an adjacent federation concern rather than part of this fixed two-host migration.
 
 ## What is already built
 
@@ -217,13 +246,13 @@ Live qualification has proven:
 
 The first live model turn exposed a service-context shell-read problem. The agent eventually produced the requested answer, but its read tools stalled past the Room reply deadline. The accepted correction preloads the exact bounded owner files through the roster adapter and forbids Room reply tool use. The corrected path returned the requested reply through the same persistent ACP session in a few seconds.
 
-The roster-backed candidate has passed its installed-host acceptance. It remains development work until the public merged revision passes the same minimum reply and recovery check.
+The roster-backed path is merged in v0.7.0 and passed installed-host plus exact-merged replay on the current A2A bridge. That proof remains the regression baseline for the federation-route migration.
 
 ## Acceptance
 
 ### Roster reply acceptance
 
-Candidate status: passed.
+Development-bridge status: passed.
 
 - one exact human `@mention` creates one canonical mention;
 - only the intended authoritative agent wakes;
@@ -240,9 +269,20 @@ Candidate status: passed.
 - process cleanup leaves no orphan delegate tree;
 - stable unrelated runtimes remain unchanged.
 
+These criteria must pass again after `federation_paths` replaces the A2A bridge.
+
 ### Cross-host Room acceptance
 
-After roster replies are released, the complete Room path must prove:
+Status: paused at `ROOM_REWORK` pending transport migration.
+
+Step 8 paused at `ROOM_REWORK` after this exact checkpoint on the bridge:
+
+1. Shared parity passed: both clients returned the same canonical messages, mentions, members, and delivery state.
+2. Client-to-owner mention passed: a client-origin exact mention of an owner-side agent returned one attributed reply.
+3. Owner-to-client mention passed: an owner-origin exact mention of a client-side agent returned one attributed reply.
+4. Multiple mentions passed: one source-ordered two-agent message returned distinct replies in the same order.
+
+The next plain message was stored with zero mentions, beginning the fifth criterion, but its full no-wake observation was not completed before upstream architecture review paused the bundle. Criteria 5 through 12 were not run. The complete migrated Room path must restart from the first criterion and prove:
 
 - human on either client can post to the same canonical transcript;
 - human can mention an agent owned by either side;
@@ -255,21 +295,27 @@ After roster replies are released, the complete Room path must prove:
 - context remains bounded;
 - every reply is visible and attributed.
 
-The project receives `ROOM_ACCEPTED` only after the complete scenario passes. Any missing criterion leaves it at `ROOM_REWORK`.
+The project receives `ROOM_ACCEPTED` only after the complete scenario passes on the permanent transport. Any missing criterion leaves it at `ROOM_REWORK`.
 
 ## Next milestones
 
-### 1. Release roster-backed replies
+### 1. Land the upstream federation substrate
 
-The accepted candidate must become a public plugin revision and retain the same exact mention, reply, session, silence, recovery, and cleanup behavior.
+Confirm the final `federation_paths` contract, compatibility floor, trust-tier propagation, and accepted named-delegate host seam.
 
-### 2. Complete shared Room acceptance
+### 2. Migrate and harden the plugin
 
-- Use real clients and real authoritative agents.
-- Exercise multiple mentions, offline recovery, restart, deduplication, attribution, and security rejection.
-- Record `ROOM_ACCEPTED` or `ROOM_REWORK` against the full definition of done.
+- replace A2A JSON-RPC client transport with the federation-authenticated plugin route;
+- remove the deterministic A2A handler after parity proof;
+- remove the installation hostname from public defaults;
+- set an honest compatibility floor;
+- enforce read-only local Room delegates at runtime.
 
-### 3. Document the accepted release
+### 3. Restart complete shared Room acceptance
+
+Use real clients and authoritative agents to repeat all criteria, including multiple mentions, offline recovery, restart, deduplication, attribution, security rejection, and process cleanup.
+
+### 4. Document the accepted release
 
 When the complete Room passes, the repository will update its release status, platform evidence, known limitations, and compatibility notes. Installation and rollout policy remains the responsibility of each deployment owner.
 
