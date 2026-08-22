@@ -75,8 +75,8 @@ def test_a2a_peer_sends_skill_hinted_operation_and_returns_structured_result(tmp
 
 
 def test_a2a_peer_can_attest_an_allowlisted_local_agent_in_room_envelope(tmp_path):
-    token = tmp_path / "peer.token"
-    token.write_text("directional-secret\n")
+    peer_file = tmp_path / "peer.value"
+    peer_file.write_text("test-peer-value\n")
     requests = []
     response = {
         "jsonrpc": "2.0",
@@ -106,7 +106,7 @@ def test_a2a_peer_can_attest_an_allowlisted_local_agent_in_room_envelope(tmp_pat
         requests.append(json.loads(request.data))
         return Response(response)
 
-    peer = A2APeer("https://room-owner.example/s1/a2a", token, open_request=open_request, poll_interval=0)
+    peer = A2APeer("https://room-owner.example/s1/a2a", peer_file, open_request=open_request, poll_interval=0)
     peer.execute("room.post", {"room_id": "ao"}, source_principal="pla")
 
     assert requests[0]["params"]["metadata"]["agent_room"]["source_principal"] == "pla"
