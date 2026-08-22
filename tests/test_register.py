@@ -102,6 +102,29 @@ def test_register_without_peer_keeps_local_api_but_advertises_no_a2a_skill(tmp_p
     assert registry.surfaces == []
 
 
+def test_register_client_mode_mounts_proxy_and_reconcile_without_owner_database(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path, peer=False)
+    config.update(
+        {
+            "mode": "client",
+            "peer_url": "https://room-owner.example/a2a",
+            "peer_token_file": str(tmp_path / "peer.token"),
+        }
+    )
+    (tmp_path / "peer.token").write_text("secret\n")
+    registry = FakeRegistry(config)
+
+    plugin.register(registry)
+
+    assert not (tmp_path / "agent-room.db").exists()
+    assert (tmp_path / "agent-room-client.db").exists()
+    assert len(registry.routers) == 1 and registry.routers[0][0] == "/api/plugins/agent-room"
+    assert [surface["name"] for surface in registry.surfaces] == ["peer-reconciliation"]
+    assert registry.skills == []
+    assert registry.handlers == {}
+
+
 def test_register_configured_dispatch_target_adds_one_worker_surface(tmp_path):
     plugin = _load_plugin()
     config = _config(tmp_path, peer=False)

@@ -9,12 +9,16 @@ from typing import cast
 
 try:  # package load under protoAgent
     from .api import build_router
+    from .client import A2APeer, ClientRoomService, ClientState, PeerReconciler
+    from .client_api import build_client_router
     from .dispatch import MentionSurface, MentionWorker
     from .operations import RoomOperations
     from .store import RoomStore
     from .transport import SKILL_ID, build_handler
 except ImportError:  # host-free pytest imports root __init__ directly
     from api import build_router
+    from client import A2APeer, ClientRoomService, ClientState, PeerReconciler
+    from client_api import build_client_router
     from dispatch import MentionSurface, MentionWorker
     from operations import RoomOperations
     from store import RoomStore
@@ -36,6 +40,23 @@ def _data_dir(config: dict) -> Path:
 
 def register(registry) -> None:
     config = dict(getattr(registry, "config", None) or {})
+    mode = str(config.get("mode") or "owner").strip().casefold()
+    if mode not in {"owner", "client"}:
+        raise ValueError("agent_room mode must be owner or client")
+    if mode == "client":
+        data_dir = _data_dir(config)
+        state = ClientState(data_dir / "agent-room-client.db")
+        peer = A2APeer(
+            str(config.get("peer_url") or ""),
+            Path(str(config.get("peer_token_file") or "")).expanduser(),
+            timeout=float(config.get("peer_timeout_seconds") or 30),
+            ca_file=Path(str(config.get("peer_ca_file"))).expanduser() if config.get("peer_ca_file") else None,
+        )
+        service = ClientRoomService(state, peer)
+        reconciler = PeerReconciler(service, interval=float(config.get("reconcile_interval_seconds") or 5))
+        registry.register_router(build_client_router(service), prefix="/api/plugins/agent-room")
+        registry.register_surface(reconciler.start, reconciler.stop, name="peer-reconciliation")
+        return
     owner = config.get("owner") if isinstance(config.get("owner"), dict) else None
     members = config.get("members") if isinstance(config.get("members"), list) else []
     local_principal = str(config.get("local_principal") or (owner or {}).get("principal") or "operator").strip()
