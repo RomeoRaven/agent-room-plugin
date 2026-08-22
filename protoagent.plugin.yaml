@@ -1,8 +1,8 @@
 id: agent-room
 name: Agent Room Backend
-version: 0.5.0
+version: 0.6.0
 description: >-
-  Durable model-free shared-room backend for protoAgent: subject rooms,
+  Durable model-free shared-room owner and deterministic peer client for protoAgent: subject rooms,
   lifecycle, bounded history, indexed search, ordered messages, stable
   client-message deduplication, cursors, membership, mention-only named-delegate
   replies, a gated local API, and deterministic Room operations.
@@ -13,8 +13,14 @@ min_protoagent_version: "0.142.1"
 config_section: agent_room
 config:
   data_dir: ""
+  mode: owner
   local_principal: operator
   peer_principal: ""
+  peer_url: ""
+  peer_token_file: ""
+  peer_ca_file: ""
+  peer_timeout_seconds: 30
+  reconcile_interval_seconds: 5
   owner:
     principal: operator
     kind: human
@@ -32,7 +38,7 @@ config:
     rate_window_seconds: 60
 
 capabilities:
-  network: []
+  network: ["protoagent-a2a.family.home"]
   filesystem: scoped
 
 emits: []

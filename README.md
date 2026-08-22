@@ -24,6 +24,10 @@ This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fl
 - Restart-safe no-replay handling for ambiguous in-flight delegate turns
 - Persisted agent-origin chain, parent mention, hop count, cycle/hop/rate blocking
 - Sanitized mention delivery state returned through `room.sync`
+- Optional deterministic client mode for one fixed S1-owned AO room
+- Directional TLS A2A proxy for post/sync/ack/members with no canonical-message cache
+- SQLite-backed pending posts and acknowledgement cursors only
+- Stable-id offline post reconciliation and explicit owner-offline/pending UI state
 - Disabled by default
 
 Dispatch is generic and opt-in. Installation-specific names stay in local configuration:
@@ -47,7 +51,7 @@ An agent with `can_mention: true` may mention another configured agent from its 
 
 New rooms inherit the installation's configured owner/member roster. Archive is read-only but reversible. Start fresh advances the default visible-history boundary without deleting messages; earlier history remains paged, searchable, and restart-safe. Archive and Start fresh refuse rooms with pending agent delivery. Permanent message/room deletion is deliberately absent.
 
-Not included yet: cross-host routing, PC1 offline outbox, attachments, reactions, per-room roster administration, permanent deletion, or general execution.
+Not included yet: PC1 roster-agent wake/replies, client-side lifecycle/search, attachments, reactions, per-room roster administration, permanent deletion, or general execution.
 
 ## Local-first product boundary
 
@@ -57,10 +61,10 @@ The ownership split is deliberate:
 
 - This plugin owns canonical Room storage, lifecycle, indexed search, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and the stable model-free Room operations.
 - protoAgent's native console owns human interaction: room switching and lifecycle controls, search presentation, navigation, member selection, mention autocomplete, recipient guidance, transcript rendering, and accessible keyboard behavior.
-- An optional peer/client adapter may call the same deterministic Room operations for another device. It owns transport, directional credentials, TLS, advertised URLs, offline outbox, and reconciliation; those concerns do not belong in this plugin's local core.
+- Optional `mode: client` calls the same deterministic Room operations for another device. It owns its directional peer URL/credential/CA reference plus `agent-room-client.db`, which stores only pending posts and acknowledgement cursors. It never stores canonical messages or assigns sequence numbers.
 - A host-local roster adapter maps that host's authoritative agents to Room principals. The Room plugin does not mirror or replace another host's agent identities.
 
-The A2A wrapper stays dormant unless `peer_principal` is explicitly configured. It remains limited to the established `post`, `sync`, `ack`, and `members` operations; lifecycle and search are local-only in this release. It is not a requirement for local use or a multi-device lifecycle engine.
+In owner mode, the A2A wrapper stays dormant unless `peer_principal` is explicitly configured. In client mode, the local API proxies only the established `post`, `sync`, `ack`, and `members` operations to the configured HTTPS owner and exposes a fixed AO room without lifecycle/search controls. Owner-mode lifecycle and search remain local-only.
 
 ## Development
 
@@ -75,8 +79,8 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Tested | v0.5 PR candidate: plugin suite, exact protoAgent host qualification, copied persistent-database migration |
-| Windows | Not tested | Intended; native validation has not been run for this release |
+| Linux | Tested | v0.6 candidate: owner/client plugin suite and native protoAgent client-mode UI build/E2E |
+| Windows | Pending live qualification | Step 7A isolated PC1 dev acceptance is required before release disposition |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.
