@@ -1,6 +1,6 @@
 id: agent-room
 name: Agent Room Backend
-version: 0.3.0
+version: 0.4.0
 description: >-
   Durable model-free shared-room backend for protoAgent: one fixed room,
   ordered messages, stable client-message deduplication, cursors, membership,

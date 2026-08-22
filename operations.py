@@ -207,6 +207,9 @@ class RoomOperations:
                 sequence=int(payload.get("sequence") or 0),
             )
         else:
-            result = {"members": self.store.members(room_id=room_id)}
+            members = self.store.members(room_id=room_id)
+            for member in members:
+                member["mentionable"] = str(member["principal"]).casefold() in self.dispatch_targets
+            result = {"members": members}
 
         return {"contract_version": CONTRACT_VERSION, "operation": operation, "result": result}

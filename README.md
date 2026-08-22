@@ -12,6 +12,7 @@ This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fl
 - Config-bound membership and author identity
 - Persistent member cursors
 - Gated local `post`, `sync`, `ack`, and `members` API
+- Room-visible `mentionable` state so the native composer suggests only configured local dispatch targets
 - Deterministic A2A `agent-room-v1` wrapper for the same operations
 - Exact configured member-token resolution with durable mention state
 - Same-message delivery to multiple explicitly mentioned targets in token order
@@ -42,6 +43,19 @@ Each dispatch principal must also be a configured Room member, and each named de
 An agent with `can_mention: true` may mention another configured agent from its Room reply. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
 
 Not included yet: cross-host routing, PC1 offline outbox, attachments, dynamic rooms, reactions, search, mutation, or general execution.
+
+## Local-first product boundary
+
+A single protoAgent instance is the complete default product. Installations can keep `peer_principal` empty and use the durable Room, native UI, local members, and local named-delegate mentions without any second device, tunnel, TLS setup, remote credential, or offline queue.
+
+The ownership split is deliberate:
+
+- This plugin owns canonical Room storage, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and the stable `post` / `sync` / `ack` / `members` contract.
+- protoAgent's native console owns human interaction: navigation, member selection, mention autocomplete, recipient guidance, transcript rendering, and accessible keyboard behavior.
+- An optional peer/client adapter may call the same deterministic Room operations for another device. It owns transport, directional credentials, TLS, advertised URLs, offline outbox, and reconciliation; those concerns do not belong in this plugin's local core.
+- A host-local roster adapter maps that host's authoritative agents to Room principals. The Room plugin does not mirror or replace another host's agent identities.
+
+The A2A wrapper stays dormant unless `peer_principal` is explicitly configured. It is a transport seam over the same four operations, not a requirement for local use and not a multi-device lifecycle engine.
 
 ## Development
 
