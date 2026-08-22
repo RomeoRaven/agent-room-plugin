@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import queue
 import re
@@ -24,7 +25,11 @@ _AGENT_FIELDS = {
     "source_of_truth",
     "record_path",
     "record_sha256",
+    "startup_context",
+    "startup_sources",
+    "startup_context_sha256",
 }
+_STRING_AGENT_FIELDS = _AGENT_FIELDS - {"startup_sources"}
 
 
 class ResolverError(RuntimeError):
@@ -164,7 +169,7 @@ class RosterResolver:
             stderr = stderr_file.read()
         return returncode, stdout, stderr
 
-    def resolve(self, agent: str) -> dict[str, str]:
+    def resolve(self, agent: str) -> dict[str, object]:
         code = str(agent or "").strip()
         if not _AGENT_CODE.fullmatch(code):
             raise ResolverError("agent must be an exact roster code")
@@ -182,8 +187,28 @@ class RosterResolver:
         record = payload.get("agent")
         if not isinstance(record, dict) or set(record) != _AGENT_FIELDS:
             raise ResolverError("roster resolver returned an invalid agent record")
-        if any(not isinstance(record[field], str) or not record[field] for field in _AGENT_FIELDS):
+        if any(not isinstance(record[field], str) or not record[field] for field in _STRING_AGENT_FIELDS):
             raise ResolverError("roster resolver agent fields must be non-empty strings")
+        context = record["startup_context"]
+        if len(context.encode("utf-8")) > 128 * 1024:
+            raise ResolverError("roster resolver startup context exceeds 131072 bytes")
+        sources = record["startup_sources"]
+        if (
+            not isinstance(sources, list)
+            or len(sources) != 3
+            or any(
+                not isinstance(source, dict)
+                or set(source) != {"path", "sha256"}
+                or not isinstance(source["path"], str)
+                or not source["path"]
+                or not isinstance(source["sha256"], str)
+                or not _SHA256.fullmatch(source["sha256"])
+                for source in sources
+            )
+        ):
+            raise ResolverError("roster resolver returned invalid startup sources")
+        if hashlib.sha256(context.encode("utf-8")).hexdigest() != record["startup_context_sha256"]:
+            raise ResolverError("roster resolver startup context hash mismatch")
         if record["code"] != code or record["status"] != "active" or not _SHA256.fullmatch(record["record_sha256"]):
             raise ResolverError("roster resolver returned a mismatched agent identity")
         return {field: record[field] for field in _AGENT_FIELDS}

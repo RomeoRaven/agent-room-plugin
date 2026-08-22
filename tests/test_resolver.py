@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 
@@ -19,7 +20,15 @@ VALID_AGENT = {
     "source_of_truth": "agents/scoped/pla.md",
     "record_path": r"C:\agent-hq\agents\scoped\pla.md",
     "record_sha256": "a" * 64,
+    "startup_context": "===== guard =====\nguard\n\n===== agents =====\nagents\n\n===== start =====\nstart",
+    "startup_sources": [
+        {"path": r"C:\guard.md", "sha256": "b" * 64},
+        {"path": r"C:\agent-hq\AGENTS.md", "sha256": "c" * 64},
+        {"path": r"C:\agent-hq\protolabs-platform\_steward\START_HERE.md", "sha256": "d" * 64},
+    ],
+    "startup_context_sha256": "e" * 64,
 }
+VALID_AGENT["startup_context_sha256"] = hashlib.sha256(VALID_AGENT["startup_context"].encode()).hexdigest()
 
 
 def _helper(tmp_path, body: str):

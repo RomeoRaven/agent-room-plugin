@@ -17,6 +17,13 @@ AGENT = {
     "source_of_truth": "agents/scoped/pla.md",
     "record_path": r"C:\agent-hq\agents\scoped\pla.md",
     "record_sha256": "a" * 64,
+    "startup_context": "PRELOADED PLA OWNER CONTEXT",
+    "startup_sources": [
+        {"path": r"C:\guard.md", "sha256": "b" * 64},
+        {"path": r"C:\agent-hq\AGENTS.md", "sha256": "c" * 64},
+        {"path": r"C:\agent-hq\protolabs-platform\_steward\START_HERE.md", "sha256": "d" * 64},
+    ],
+    "startup_context_sha256": "e" * 64,
 }
 
 
@@ -118,6 +125,8 @@ async def test_worker_resolves_live_wakes_exact_acp_session_once_and_posts_attri
     delegate, prompt, conversation_key = calls[0]
     assert delegate == "pla-room" and conversation_key == "ao:thread-1:pla"
     assert AGENT["start_here"] in prompt and "Earlier context" in prompt and "@PLA return STEP7B_MARKER" in prompt
+    assert "PRELOADED PLA OWNER CONTEXT" in prompt
+    assert "Do not invoke tools" in prompt
     post = peer.calls[-1]
     assert post[0] == "room.post" and post[2] == "pla"
     assert post[1]["client_message_id"] == "mention-reply:mention-1"
