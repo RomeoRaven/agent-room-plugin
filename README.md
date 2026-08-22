@@ -71,4 +71,12 @@ ruff format --check .
 pytest -q
 ```
 
+## Platform validation
+
+| Platform | Status | Evidence / follow-up |
+|---|---|---|
+| Linux | Tested | v0.5 PR candidate: plugin suite, exact protoAgent host qualification, copied persistent-database migration |
+| Windows | Not tested | Intended; native validation has not been run for this release |
+| macOS | Not tested | Intended; native validation has not been run for this release |
+
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.
