@@ -38,10 +38,16 @@ def _data_part(payload: dict) -> Part:
     return part
 
 
-def build_handler(operations: RoomOperations, *, peer_principal: str):
+def build_handler(
+    operations: RoomOperations,
+    *,
+    peer_principal: str,
+    peer_agent_principals: set[str] | frozenset[str] | None = None,
+):
     principal = str(peer_principal or "").strip()
     if not principal:
         raise ValueError("peer_principal is required")
+    allowed_agents = {str(value).strip() for value in (peer_agent_principals or set()) if str(value).strip()}
 
     async def handle(context) -> list[Part]:
         envelope = _metadata(context).get("agent_room")
@@ -56,13 +62,19 @@ def build_handler(operations: RoomOperations, *, peer_principal: str):
         payload = envelope.get("payload")
         if not isinstance(payload, dict):
             raise ValueError("agent_room payload must be an object")
+        source_principal = str(envelope.get("source_principal") or principal).strip()
+        if source_principal != principal:
+            if operation != "room.post" or source_principal not in allowed_agents:
+                raise PermissionError(f"source principal {source_principal!r} is not authorized for peer {principal!r}")
+            if not str(payload.get("completes_mention_id") or "").strip():
+                raise PermissionError("attested agent posts must complete a canonical remote mention")
         if operation == "room.sync":
             local_fields = {field for field in ("before", "around", "history") if field in payload}
             if local_fields:
                 field = sorted(local_fields)[0]
                 raise ValueError(f"unsupported agent-room transport payload field {field!r}")
             payload = {**payload, "after": int(payload.get("after") or 0)}
-        result = operations.execute(operation, payload, principal=principal)
+        result = operations.execute(operation, payload, principal=source_principal)
         return [_data_part(result)]
 
     return handle

@@ -74,11 +74,17 @@ class RoomOperations:
         mention_policy: dict | None = None,
     ):
         self.store = store
-        self.dispatch_targets = {
-            str(principal).casefold(): dict(target)
-            for principal, target in (dispatch_targets or {}).items()
-            if isinstance(target, dict) and str(target.get("delegate") or "").strip()
-        }
+        self.dispatch_targets = {}
+        for principal, raw_target in (dispatch_targets or {}).items():
+            if not isinstance(raw_target, dict):
+                continue
+            target = dict(raw_target)
+            delegate = str(target.get("delegate") or "").strip()
+            remote_peer = str(target.get("remote_peer") or "").strip()
+            if bool(delegate) == bool(remote_peer):
+                continue
+            target["delegate"] = delegate or f"remote:{remote_peer}"
+            self.dispatch_targets[str(principal).casefold()] = target
         policy = mention_policy or {}
         self.max_agent_hops = max(0, min(int(policy.get("max_agent_hops", 1)), 10))
         self.max_mentions_per_target = max(1, min(int(policy.get("max_mentions_per_target", 5)), 100))
@@ -107,6 +113,13 @@ class RoomOperations:
         for member in members:
             target = self.dispatch_targets.get(str(member["principal"]).casefold())
             if target is None:
+                continue
+            if (
+                source is not None
+                and source["kind"] == "agent"
+                and target.get("remote_peer")
+                and target.get("allow_agent_sources") is not True
+            ):
                 continue
             token = str(member["mention_token"])
             for match in re.finditer(rf"(?<!\w){re.escape(token)}(?!\w)", body, flags=re.IGNORECASE):
@@ -245,17 +258,41 @@ class RoomOperations:
             result = {"room": self.store.reset_room(room_id=room_id, principal=bound_principal)}
         elif operation == "room.post":
             body = _string(payload, "body", max_length=20000)
+            completion_id = _optional_string(payload, "completes_mention_id", max_length=200)
+            completion = self.store.mention(completion_id) if completion_id else None
+            reply_to_message_id = _optional_string(payload, "reply_to_message_id", max_length=200)
+            if completion is not None and (
+                completion["room_id"] != room_id
+                or completion["target_principal"] != bound_principal
+                or completion["source_message_id"] != reply_to_message_id
+                or not str(completion["delegate_name"]).startswith("remote:")
+            ):
+                raise PermissionError("remote mention completion does not match the attested reply")
+            member = next(
+                member for member in self.store.members(room_id=room_id) if member["principal"] == bound_principal
+            )
             result = self.store.post(
                 room_id=room_id,
                 principal=bound_principal,
                 client_message_id=_string(payload, "client_message_id", max_length=200),
                 body=body,
+                author_kind=str(member["kind"]),
                 thread_id=_optional_string(payload, "thread_id", max_length=200),
-                reply_to_message_id=_optional_string(payload, "reply_to_message_id", max_length=200),
+                reply_to_message_id=reply_to_message_id,
                 mentions=self.resolve_mentions(room_id=room_id, principal=bound_principal, body=body),
             )
             result.setdefault("mentions", [])
             result["mentions"] = self._public_mentions(result["mentions"])
+            if completion_id:
+                result["completed_mention"] = self._public_mentions(
+                    [
+                        self.store.complete_remote_mention(
+                            completion_id,
+                            target_principal=bound_principal,
+                            reply_message_id=result["message"]["id"],
+                        )
+                    ]
+                )[0]
         elif operation == "room.sync":
             result = self.store.sync(
                 room_id=room_id,

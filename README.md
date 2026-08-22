@@ -26,8 +26,11 @@ This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fl
 - Sanitized mention delivery state returned through `room.sync`
 - Optional deterministic client mode for one fixed S1-owned AO room
 - Directional TLS A2A proxy for post/sync/ack/members with no canonical-message cache
-- SQLite-backed pending posts and acknowledgement cursors only
+- SQLite-backed pending posts, acknowledgement/delivery cursors, and local mention-dispatch claims only
 - Stable-id offline post reconciliation and explicit owner-offline/pending UI state
+- Live host-roster admission for configured client-side agent targets
+- Durable hash-keyed local mention claims with no replay after ambiguous ACP interruption
+- Host-attested, owner-allowlisted agent attribution for one canonical same-thread reply
 - Disabled by default
 
 Dispatch is generic and opt-in. Installation-specific names stay in local configuration:
@@ -45,13 +48,13 @@ agent_room:
     rate_window_seconds: 60
 ```
 
-Each dispatch principal must also be a configured Room member, and each named delegate must already exist in protoAgent. Multiple explicit tokens in one message create one ordered durable mention per target; repeated tokens for the same target still create one mention. Delegate identity plus the Room/thread conversation key keeps ACP sessions separate. Plain text wakes nobody and `@all` remains rejected.
+Each owner-side dispatch principal must also be a configured Room member. A target binds either one local named delegate or one remote peer, never both. A configured client-side target resolves its exact code from a fixed host-owned stdin/JSON resolver before and after one readonly named-delegate ACP turn. Multiple explicit tokens in one message create one ordered durable mention per target; repeated tokens for the same target still create one mention. Delegate identity plus the Room/thread conversation key keeps ACP sessions separate. Plain text wakes nobody and `@all` remains rejected.
 
 An agent with `can_mention: true` may mention another configured agent from its Room reply. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
 
 New rooms inherit the installation's configured owner/member roster. Archive is read-only but reversible. Start fresh advances the default visible-history boundary without deleting messages; earlier history remains paged, searchable, and restart-safe. Archive and Start fresh refuse rooms with pending agent delivery. Permanent message/room deletion is deliberately absent.
 
-Not included yet: PC1 roster-agent wake/replies, client-side lifecycle/search, attachments, reactions, per-room roster administration, permanent deletion, or general execution.
+Not included yet: client-side lifecycle/search, attachments, reactions, per-room roster administration, permanent deletion, or general execution.
 
 ## Local-first product boundary
 
@@ -61,7 +64,7 @@ The ownership split is deliberate:
 
 - This plugin owns canonical Room storage, lifecycle, indexed search, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and the stable model-free Room operations.
 - protoAgent's native console owns human interaction: room switching and lifecycle controls, search presentation, navigation, member selection, mention autocomplete, recipient guidance, transcript rendering, and accessible keyboard behavior.
-- Optional `mode: client` calls the same deterministic Room operations for another device. It owns its directional peer URL/credential/CA reference plus `agent-room-client.db`, which stores only pending posts and acknowledgement cursors. It never stores canonical messages or assigns sequence numbers.
+- Optional `mode: client` calls the same deterministic Room operations for another device. It owns its directional peer URL/credential/CA reference plus `agent-room-client.db`, which stores pending posts, acknowledgement/delivery cursors, and local mention-dispatch claims only. It never stores canonical messages or assigns sequence numbers.
 - A host-local roster adapter maps that host's authoritative agents to Room principals. The Room plugin does not mirror or replace another host's agent identities.
 
 In owner mode, the A2A wrapper stays dormant unless `peer_principal` is explicitly configured. In client mode, the local API proxies only the established `post`, `sync`, `ack`, and `members` operations to the configured HTTPS owner and exposes a fixed AO room without lifecycle/search controls. Owner-mode lifecycle and search remain local-only.
@@ -79,8 +82,8 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Tested | v0.6 candidate: owner/client plugin suite and native protoAgent client-mode UI build/E2E |
-| Windows | Tested | v0.6 candidate: native Ruff/format and 74-test suite plus isolated live owner/client offline/restart acceptance |
+| Linux | Tested | v0.7 candidate: owner/client/roster-dispatch plugin suite |
+| Windows | Qualification pending | v0.7 exact candidate requires native resolver, ACP, Room wake/reply, restart and cleanup acceptance |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.

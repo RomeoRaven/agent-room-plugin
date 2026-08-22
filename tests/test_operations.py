@@ -65,6 +65,72 @@ def test_members_identify_only_configured_dispatch_targets_as_mentionable(tmp_pa
     assert members["dennis"]["mentionable"] is False
 
 
+def test_remote_target_creates_canonical_pending_mention_without_local_worker_claim(tmp_path):
+    store = RoomStore(
+        tmp_path / "agent-room.db",
+        owner={
+            "principal": "dennis",
+            "kind": "human",
+            "display_name": "Dennis",
+            "role": "owner",
+            "mention_token": "@Dennis",
+            "host": "operator",
+            "can_post": True,
+            "can_mention": True,
+        },
+        members=[
+            {
+                "principal": "pc1",
+                "kind": "host",
+                "display_name": "PC1",
+                "role": "member",
+                "mention_token": "@PC1",
+                "host": "pc1",
+                "can_post": True,
+                "can_mention": True,
+            },
+            {
+                "principal": "pla",
+                "kind": "agent",
+                "display_name": "protoLabs Agent",
+                "role": "member",
+                "mention_token": "@PLA",
+                "host": "pc1",
+                "can_post": True,
+                "can_mention": False,
+            },
+            {
+                "principal": "hermes",
+                "kind": "agent",
+                "display_name": "Hermes",
+                "role": "member",
+                "mention_token": "@Hermes",
+                "host": "s1",
+                "can_post": True,
+                "can_mention": True,
+            },
+        ],
+    )
+    operations = RoomOperations(store, dispatch_targets={"pla": {"remote_peer": "pc1", "allow_agent_sources": False}})
+
+    posted = operations.execute(
+        "room.post", {"room_id": "ao", "client_message_id": "human-pla", "body": "@PLA status?"}, principal="pc1"
+    )
+    agent_post = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "agent-pla", "body": "@PLA should stay silent"},
+        principal="hermes",
+    )
+    members = operations.execute("room.members", {"room_id": "ao"}, principal="pc1")
+
+    mention = posted["result"]["mentions"][0]
+    assert mention["target_principal"] == "pla" and mention["status"] == "pending"
+    assert store.mention(mention["id"])["delegate_name"] == "remote:pc1"
+    assert agent_post["result"]["mentions"] == []
+    assert {m["principal"]: m["mentionable"] for m in members["result"]["members"]}["pla"] is True
+    assert store.claim_mention_work() is None
+
+
 def test_operations_reject_wire_identity_and_nonmembers(tmp_path):
     operations = _service(tmp_path)
 

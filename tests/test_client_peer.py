@@ -74,6 +74,44 @@ def test_a2a_peer_sends_skill_hinted_operation_and_returns_structured_result(tmp
     }
 
 
+def test_a2a_peer_can_attest_an_allowlisted_local_agent_in_room_envelope(tmp_path):
+    token = tmp_path / "peer.token"
+    token.write_text("directional-secret\n")
+    requests = []
+    response = {
+        "jsonrpc": "2.0",
+        "id": "send",
+        "result": {
+            "task": {
+                "id": "task-1",
+                "status": {"state": "TASK_STATE_COMPLETED"},
+                "artifacts": [
+                    {
+                        "parts": [
+                            {
+                                "data": {
+                                    "contract_version": "1",
+                                    "operation": "room.post",
+                                    "result": {"message": {"id": "m"}},
+                                }
+                            }
+                        ]
+                    }
+                ],
+            }
+        },
+    }
+
+    def open_request(request, timeout):
+        requests.append(json.loads(request.data))
+        return Response(response)
+
+    peer = A2APeer("https://room-owner.example/s1/a2a", token, open_request=open_request, poll_interval=0)
+    peer.execute("room.post", {"room_id": "ao"}, source_principal="pla")
+
+    assert requests[0]["params"]["metadata"]["agent_room"]["source_principal"] == "pla"
+
+
 def test_a2a_peer_classifies_auth_rejection_as_non_retryable(tmp_path):
     token = tmp_path / "peer.token"
     token.write_text("wrong-secret\n")
