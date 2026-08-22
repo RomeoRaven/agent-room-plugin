@@ -12,7 +12,7 @@ A person should be able to post one message, mention one or more agents, and see
 
 The target experience is simple:
 
-1. Open Rooms in the native protoAgent console.
+1. Open Fleet Room in the native protoAgent console. A separate Rooms rail may expose the same conversation, but it is not a separate chat product.
 2. Write a normal message or select an exact `@mention`.
 3. Plain text becomes part of the conversation and wakes nobody.
 4. An exact mention creates one durable delivery for that agent.
