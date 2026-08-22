@@ -57,7 +57,7 @@ class MentionWorker:
                 reply_body = await self.invoke_delegate(
                     work["delegate_name"],
                     self._prompt(work),
-                    f"{work['room_id']}:{work['source_thread_id']}",
+                    f"{work['room_id']}:{work['source_generation']}:{work['source_thread_id']}",
                 )
                 work = {
                     **work,

@@ -83,3 +83,25 @@ async def test_a2a_handler_rejects_missing_or_wrong_contract_and_wire_identity(t
                 }
             )
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation",
+    ["room.create", "room.rename", "room.archive", "room.restore", "room.reset", "room.search"],
+)
+async def test_a2a_handler_keeps_local_lifecycle_and_search_off_transport(tmp_path, operation):
+    handler = _handler(tmp_path)
+
+    with pytest.raises(ValueError, match="unsupported agent-room transport operation"):
+        await handler(
+            SimpleNamespace(
+                metadata={
+                    "agent_room": {
+                        "contract_version": "1",
+                        "operation": operation,
+                        "payload": {"room_id": "ao", "name": "No", "query": "No"},
+                    }
+                }
+            )
+        )

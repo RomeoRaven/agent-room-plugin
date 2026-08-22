@@ -60,7 +60,7 @@ The ownership split is deliberate:
 - An optional peer/client adapter may call the same deterministic Room operations for another device. It owns transport, directional credentials, TLS, advertised URLs, offline outbox, and reconciliation; those concerns do not belong in this plugin's local core.
 - A host-local roster adapter maps that host's authoritative agents to Room principals. The Room plugin does not mirror or replace another host's agent identities.
 
-The A2A wrapper stays dormant unless `peer_principal` is explicitly configured. It is a transport seam over the same deterministic operations, not a requirement for local use and not a multi-device lifecycle engine.
+The A2A wrapper stays dormant unless `peer_principal` is explicitly configured. It remains limited to the established `post`, `sync`, `ack`, and `members` operations; lifecycle and search are local-only in this release. It is not a requirement for local use or a multi-device lifecycle engine.
 
 ## Development
 

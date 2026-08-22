@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import unicodedata
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,6 +51,15 @@ class RoomStore:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA journal_mode=WAL")
         return conn
+
+    @staticmethod
+    def _name_key(name: str) -> str:
+        return unicodedata.normalize("NFKC", name).casefold()
+
+    def _active_name_exists(self, conn: sqlite3.Connection, *, name: str, exclude_room_id: str | None = None) -> bool:
+        key = self._name_key(name)
+        rows = conn.execute("SELECT id, name FROM rooms WHERE status='active'").fetchall()
+        return any(row["id"] != exclude_room_id and self._name_key(row["name"]) == key for row in rows)
 
     def _sync_configured_members(self, conn: sqlite3.Connection, room_id: str) -> None:
         principals = [str(member["principal"]).strip() for member in self._configured_members]
@@ -333,17 +343,9 @@ class RoomStore:
         now = _now()
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            owner = conn.execute(
-                "SELECT 1 FROM members WHERE principal=? AND role='owner' LIMIT 1",
-                (principal,),
-            ).fetchone()
-            if owner is None:
-                raise PermissionError("only a room owner may create rooms")
-            duplicate = conn.execute(
-                "SELECT 1 FROM rooms WHERE status='active' AND lower(name)=lower(?)",
-                (title,),
-            ).fetchone()
-            if duplicate is not None:
+            if principal != str(self._owner["principal"]).strip():
+                raise PermissionError("only the configured room owner may create rooms")
+            if self._active_name_exists(conn, name=title):
                 raise RoomConflict("an active room already uses that name")
             conn.execute(
                 """INSERT INTO rooms(
@@ -355,14 +357,15 @@ class RoomStore:
             conn.commit()
         return self.room(room_id=room_id, principal=principal)
 
-    @staticmethod
-    def _require_owner(conn: sqlite3.Connection, *, room_id: str, principal: str) -> None:
+    def _require_owner(self, conn: sqlite3.Connection, *, room_id: str, principal: str) -> None:
+        if principal != str(self._owner["principal"]).strip():
+            raise PermissionError("only the configured room owner may change room lifecycle")
         owner = conn.execute(
             "SELECT 1 FROM members WHERE room_id=? AND principal=? AND role='owner'",
             (room_id, principal),
         ).fetchone()
         if owner is None:
-            raise PermissionError("only a room owner may change room lifecycle")
+            raise PermissionError("only the configured room owner may change room lifecycle")
 
     def rename_room(self, *, room_id: str, name: str, principal: str) -> dict:
         title = str(name or "").strip()
@@ -376,13 +379,8 @@ class RoomStore:
             room = conn.execute("SELECT status FROM rooms WHERE id=?", (room_id,)).fetchone()
             if room is None:
                 raise KeyError(f"unknown room {room_id!r}")
-            if room["status"] == "active":
-                duplicate = conn.execute(
-                    "SELECT 1 FROM rooms WHERE id!=? AND status='active' AND lower(name)=lower(?)",
-                    (room_id, title),
-                ).fetchone()
-                if duplicate is not None:
-                    raise RoomConflict("an active room already uses that name")
+            if room["status"] == "active" and self._active_name_exists(conn, name=title, exclude_room_id=room_id):
+                raise RoomConflict("an active room already uses that name")
             conn.execute("UPDATE rooms SET name=?, updated_at=? WHERE id=?", (title, _now(), room_id))
             conn.commit()
         return self.room(room_id=room_id, principal=principal)
@@ -419,11 +417,7 @@ class RoomStore:
                 raise KeyError(f"unknown room {room_id!r}")
             if room["status"] != "archived":
                 raise RoomConflict("room is already active")
-            duplicate = conn.execute(
-                "SELECT 1 FROM rooms WHERE id!=? AND status='active' AND lower(name)=lower(?)",
-                (room_id, room["name"]),
-            ).fetchone()
-            if duplicate is not None:
+            if self._active_name_exists(conn, name=room["name"], exclude_room_id=room_id):
                 raise RoomConflict("an active room already uses that name")
             conn.execute(
                 "UPDATE rooms SET status='active', archived_at=NULL, updated_at=? WHERE id=?",
@@ -476,7 +470,10 @@ class RoomStore:
     ) -> dict:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            room = conn.execute("SELECT status FROM rooms WHERE id=?", (room_id,)).fetchone()
+            room = conn.execute(
+                "SELECT status, active_from_sequence FROM rooms WHERE id=?",
+                (room_id,),
+            ).fetchone()
             if room is None:
                 raise KeyError(f"unknown room {room_id!r}")
             member = conn.execute(
@@ -514,12 +511,26 @@ class RoomStore:
 
             if room["status"] != "active":
                 raise RoomConflict("archived room is read-only")
+            reply_target = None
+            if reply_to_message_id:
+                reply_target = conn.execute(
+                    "SELECT room_id, sequence, thread_id FROM messages WHERE id=?",
+                    (reply_to_message_id,),
+                ).fetchone()
+                if (
+                    reply_target is None
+                    or reply_target["room_id"] != room_id
+                    or int(reply_target["sequence"]) < int(room["active_from_sequence"])
+                ):
+                    raise RoomConflict("reply target is outside current room history")
+                if thread_id is not None and thread_id != reply_target["thread_id"]:
+                    raise RoomConflict("reply thread does not match target thread")
             sequence = conn.execute(
                 "SELECT COALESCE(MAX(sequence), 0) + 1 FROM messages WHERE room_id=?",
                 (room_id,),
             ).fetchone()[0]
             message_id = str(uuid.uuid4())
-            canonical_thread = thread_id or message_id
+            canonical_thread = thread_id or (reply_target["thread_id"] if reply_target is not None else message_id)
             created_at = _now()
             conn.execute(
                 """INSERT INTO messages(
@@ -635,10 +646,14 @@ class RoomStore:
             row = conn.execute(
                 """SELECT m.*, msg.body AS source_body,
                           msg.thread_id AS source_thread_id,
-                          msg.sequence AS source_sequence
+                          msg.sequence AS source_sequence,
+                          room.active_from_sequence AS source_generation
                    FROM mentions AS m
                    JOIN messages AS msg ON msg.id=m.source_message_id
+                   JOIN rooms AS room ON room.id=m.room_id
                    WHERE m.status IN ('reply_ready', 'pending')
+                     AND room.status='active'
+                     AND msg.sequence>=room.active_from_sequence
                    ORDER BY CASE m.status WHEN 'reply_ready' THEN 0 ELSE 1 END,
                             msg.sequence, m.position, m.created_at, m.id LIMIT 1"""
             ).fetchone()
@@ -663,6 +678,7 @@ class RoomStore:
             "source_body": row["source_body"],
             "source_thread_id": row["source_thread_id"],
             "source_sequence": row["source_sequence"],
+            "source_generation": row["source_generation"],
         }
 
     def recent_mention_count(self, *, room_id: str, target_principal: str, since: str) -> int:
@@ -677,9 +693,11 @@ class RoomStore:
     def thread_context(self, *, room_id: str, thread_id: str, through_sequence: int, limit: int = 20) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT * FROM messages
-                   WHERE room_id=? AND thread_id=? AND sequence<=?
-                   ORDER BY sequence DESC LIMIT ?""",
+                """SELECT msg.* FROM messages AS msg
+                   JOIN rooms AS room ON room.id=msg.room_id
+                   WHERE msg.room_id=? AND msg.thread_id=? AND msg.sequence<=?
+                     AND msg.sequence>=room.active_from_sequence
+                   ORDER BY msg.sequence DESC LIMIT ?""",
                 (room_id, thread_id, through_sequence, max(1, min(int(limit), 20))),
             ).fetchall()
         return [self._message(row) for row in reversed(rows)]

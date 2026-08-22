@@ -264,7 +264,7 @@ def test_active_room_names_are_unique_and_only_owner_can_create(tmp_path):
     first = operations.execute("room.create", {"name": "Topic"}, principal="dennis")["result"]["room"]
     with pytest.raises(RoomConflict, match="already uses that name"):
         operations.execute("room.create", {"name": "topic"}, principal="dennis")
-    with pytest.raises(PermissionError, match="only a room owner"):
+    with pytest.raises(PermissionError, match="only the configured room owner"):
         operations.execute("room.create", {"name": "Unauthorized"}, principal="hermes")
 
     operations.execute("room.archive", {"room_id": first["id"]}, principal="dennis")
@@ -272,3 +272,66 @@ def test_active_room_names_are_unique_and_only_owner_can_create(tmp_path):
     assert replacement["status"] == "active"
     with pytest.raises(RoomConflict, match="already uses that name"):
         operations.execute("room.restore", {"room_id": first["id"]}, principal="dennis")
+
+    operations.execute("room.create", {"name": "Ångström"}, principal="dennis")
+    with pytest.raises(RoomConflict, match="already uses that name"):
+        operations.execute("room.create", {"name": "ångström"}, principal="dennis")
+
+
+def test_only_configured_owner_principal_has_lifecycle_authority(tmp_path):
+    extra_owner = {**HERMES, "principal": "extra", "display_name": "Extra", "mention_token": "@Extra", "role": "owner"}
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[extra_owner])
+    operations = RoomOperations(store)
+
+    with pytest.raises(PermissionError, match="only the configured room owner"):
+        operations.execute("room.create", {"name": "Unauthorized"}, principal="extra")
+    with pytest.raises(PermissionError, match="only the configured room owner"):
+        operations.execute("room.rename", {"room_id": "ao", "name": "Unauthorized"}, principal="extra")
+
+
+def test_start_fresh_excludes_earlier_messages_even_if_thread_id_is_reused(tmp_path):
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES])
+    operations = RoomOperations(store)
+    room = operations.execute("room.create", {"name": "Fresh context"}, principal="dennis")["result"]["room"]
+    operations.execute(
+        "room.post",
+        {"room_id": room["id"], "client_message_id": "old", "body": "old private context", "thread_id": "same"},
+        principal="dennis",
+    )
+    operations.execute("room.reset", {"room_id": room["id"]}, principal="dennis")
+    new = operations.execute(
+        "room.post",
+        {"room_id": room["id"], "client_message_id": "new", "body": "new clean context", "thread_id": "same"},
+        principal="dennis",
+    )["result"]["message"]
+
+    context = store.thread_context(
+        room_id=room["id"],
+        thread_id="same",
+        through_sequence=new["sequence"],
+        limit=20,
+    )
+    assert [message["body"] for message in context] == ["new clean context"]
+
+
+def test_start_fresh_rejects_new_reply_links_to_earlier_history(tmp_path):
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES])
+    operations = RoomOperations(store)
+    old = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "old-link", "body": "old"},
+        principal="dennis",
+    )["result"]["message"]
+    operations.execute("room.reset", {"room_id": "ao"}, principal="dennis")
+
+    with pytest.raises(RoomConflict, match="current room history"):
+        operations.execute(
+            "room.post",
+            {
+                "room_id": "ao",
+                "client_message_id": "bad-link",
+                "body": "new reply",
+                "reply_to_message_id": old["id"],
+            },
+            principal="dennis",
+        )

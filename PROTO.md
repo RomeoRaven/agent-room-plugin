@@ -64,7 +64,7 @@ Keep multi-device concerns outside the local core:
 | Private route, TLS, directional credentials, advertised URLs, offline outbox, reconciliation | Optional peer/client adapter |
 | Authoritative agent identity and principal-to-runtime binding | Host-local roster adapter |
 
-The conditional `agent-room-v1` A2A handler is only a deterministic adapter over the Room operations. Do not grow it into route provisioning, credential distribution, retry scheduling, PC1-specific knowledge, or a second Room owner.
+The conditional `agent-room-v1` A2A handler remains a deterministic adapter over `post`, `sync`, `ack`, and `members` only. Lifecycle and search stay local-only in this release. Do not grow it into route provisioning, credential distribution, retry scheduling, PC1-specific knowledge, or a second Room owner.
 
 ## Gate
 
