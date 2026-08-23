@@ -142,8 +142,8 @@ async def test_worker_invokes_once_and_posts_one_same_thread_reply(tmp_path):
     )["result"]
     calls = []
 
-    async def invoke(delegate_name: str, prompt: str, conversation_key: str) -> str:
-        calls.append((delegate_name, prompt, conversation_key))
+    async def invoke(delegate_name: str, prompt: str, conversation_key: str, *, permissions: str) -> str:
+        calls.append((delegate_name, prompt, conversation_key, permissions))
         return "Hermes is present."
 
     worker = MentionWorker(store, invoke_delegate=invoke)
@@ -153,6 +153,7 @@ async def test_worker_invokes_once_and_posts_one_same_thread_reply(tmp_path):
     assert len(calls) == 1
     assert calls[0][0] == "hermes_s1"
     assert calls[0][2] == f"ao:1:{source['message']['thread_id']}"
+    assert calls[0][3] == "readonly"
     assert "Status please @Hermes" in calls[0][1]
 
     messages = store.sync(room_id="ao", after=0, limit=10)["messages"]
@@ -175,7 +176,7 @@ async def test_start_fresh_changes_delegate_conversation_generation_even_when_th
     operations = RoomOperations(store, dispatch_targets={"hermes": {"delegate": "hermes_s1"}})
     keys = []
 
-    async def invoke(delegate_name: str, prompt: str, conversation_key: str) -> str:
+    async def invoke(delegate_name: str, prompt: str, conversation_key: str, **_kwargs) -> str:
         keys.append(conversation_key)
         return "done"
 
@@ -219,7 +220,7 @@ async def test_two_configured_targets_wake_independently_with_distinct_routes_an
     )["result"]
     calls = []
 
-    async def invoke(delegate_name: str, prompt: str, conversation_key: str) -> str:
+    async def invoke(delegate_name: str, prompt: str, conversation_key: str, **_kwargs) -> str:
         calls.append((delegate_name, prompt, conversation_key))
         return f"reply from {delegate_name}"
 
@@ -272,7 +273,7 @@ async def test_one_message_wakes_mentioned_targets_once_in_token_order_and_leave
     )["result"]
     calls = []
 
-    async def invoke(delegate_name: str, _prompt: str, conversation_key: str) -> str:
+    async def invoke(delegate_name: str, _prompt: str, conversation_key: str, **_kwargs) -> str:
         calls.append((delegate_name, conversation_key))
         return f"reply from {delegate_name}"
 
@@ -313,7 +314,7 @@ async def test_agent_reply_mentions_other_agent_once_and_persists_origin_chain_w
     )["result"]
     calls = []
 
-    async def invoke(delegate_name: str, _prompt: str, _conversation_key: str) -> str:
+    async def invoke(delegate_name: str, _prompt: str, _conversation_key: str, **_kwargs) -> str:
         calls.append(delegate_name)
         if delegate_name == "hermes_s1":
             return "Passing this once to @Headroom"
@@ -373,7 +374,7 @@ async def test_agent_hop_limit_blocks_a_third_agent_without_invoking_it(tmp_path
     )
     calls = []
 
-    async def invoke(delegate_name: str, _prompt: str, _conversation_key: str) -> str:
+    async def invoke(delegate_name: str, _prompt: str, _conversation_key: str, **_kwargs) -> str:
         calls.append(delegate_name)
         return {
             "hermes_s1": "Continue to @Headroom",
@@ -417,7 +418,7 @@ async def test_per_room_target_rate_limit_blocks_excess_without_extra_delegate_t
     assert second["mentions"][0]["error"] == "mention rate limit reached"
     calls = 0
 
-    async def invoke(*_args) -> str:
+    async def invoke(*_args, **_kwargs) -> str:
         nonlocal calls
         calls += 1
         return "one reply"
@@ -486,7 +487,7 @@ async def test_reply_ready_restart_posts_child_mention_without_reinvoking_parent
     )
     calls = []
 
-    async def invoke(delegate_name: str, _prompt: str, _conversation_key: str) -> str:
+    async def invoke(delegate_name: str, _prompt: str, _conversation_key: str, **_kwargs) -> str:
         calls.append(delegate_name)
         return "Headroom recovered"
 
@@ -526,7 +527,7 @@ async def test_delegate_failure_is_sanitized_in_public_mention_state(tmp_path):
         principal="dennis",
     )["result"]
 
-    async def invoke(*_args) -> str:
+    async def invoke(*_args, **_kwargs) -> str:
         raise RuntimeError("delegate hermes_s1 failed at /private/local")
 
     worker = MentionWorker(store, invoke_delegate=invoke)
@@ -559,7 +560,7 @@ async def test_reply_post_failure_marks_failed_and_worker_can_continue(tmp_path)
     )["result"]
     calls = 0
 
-    async def invoke(*_args) -> str:
+    async def invoke(*_args, **_kwargs) -> str:
         nonlocal calls
         calls += 1
         return "reply"
@@ -598,7 +599,7 @@ async def test_restart_marks_interrupted_invocation_ambiguous_without_replay(tmp
 
     calls = 0
 
-    async def invoke(*_args) -> str:
+    async def invoke(*_args, **_kwargs) -> str:
         nonlocal calls
         calls += 1
         return "must not run"

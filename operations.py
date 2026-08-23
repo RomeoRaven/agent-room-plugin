@@ -1,4 +1,4 @@
-"""Versioned model-free room operations shared by local API and A2A ingress."""
+"""Versioned model-free room operations shared by local and federation APIs."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ OPERATIONS = frozenset(
         "room.members",
     }
 )
-_IDENTITY_FIELDS = frozenset({"principal", "author", "author_principal", "source"})
+_IDENTITY_FIELDS = frozenset({"principal", "author", "author_principal", "source", "source_principal"})
 _PUBLIC_MENTION_FIELDS = (
     "id",
     "room_id",

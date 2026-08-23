@@ -30,19 +30,13 @@ class FakeRegistry:
         self.handlers = {}
         self.surfaces = []
 
-        async def invoke_delegate(_name, _prompt, _key):
+        async def invoke_delegate(_name, _prompt, _key, *, permissions="readonly"):
             return "reply"
 
         self.host = SimpleNamespace(invoke_delegate=invoke_delegate)
 
     def register_router(self, router, prefix=None):
         self.routers.append((prefix, router))
-
-    def register_a2a_skill(self, spec):
-        self.skills.append(spec)
-
-    def register_a2a_handler(self, skill_id, handler):
-        self.handlers[skill_id] = handler
 
     def register_surface(self, start, stop=None, name=None, reload=None):
         self.surfaces.append({"start": start, "stop": stop, "name": name, "reload": reload})
@@ -78,16 +72,21 @@ def _config(tmp_path, *, peer=True):
     }
 
 
-def test_register_mounts_gated_api_and_configured_a2a_handler(tmp_path):
+def test_register_mounts_local_and_federation_routers_without_a2a_ownership(tmp_path):
     plugin = _load_plugin()
     registry = FakeRegistry(_config(tmp_path))
 
     plugin.register(registry)
 
     assert (tmp_path / "agent-room.db").exists()
-    assert len(registry.routers) == 1 and registry.routers[0][0] == "/api/plugins/agent-room"
-    assert [skill["id"] for skill in registry.skills] == ["agent-room-v1"]
-    assert set(registry.handlers) == {"agent-room-v1"}
+    assert len(registry.routers) == 2
+    assert [prefix for prefix, _router in registry.routers] == [
+        "/api/plugins/agent-room",
+        "/api/plugins/agent-room",
+    ]
+    assert {route.path for route in registry.routers[1][1].routes} == {"/v1/execute"}
+    assert registry.skills == []
+    assert registry.handlers == {}
 
 
 def test_register_without_peer_keeps_local_api_but_advertises_no_a2a_skill(tmp_path):
@@ -108,7 +107,7 @@ def test_register_client_mode_mounts_proxy_and_reconcile_without_owner_database(
     config.update(
         {
             "mode": "client",
-            "peer_url": "https://room-owner.example/a2a",
+            "peer_url": "https://room-owner.example/api/plugins/agent-room/v1/execute",
             "peer_token_file": str(tmp_path / "peer.token"),
         }
     )
@@ -131,7 +130,7 @@ def test_register_client_roster_target_adds_live_resolver_and_durable_delivery_s
     config.update(
         {
             "mode": "client",
-            "peer_url": "https://room-owner.example/a2a",
+            "peer_url": "https://room-owner.example/api/plugins/agent-room/v1/execute",
             "peer_token_file": str(tmp_path / "peer.token"),
             "dispatch_targets": {
                 "pla": {
@@ -161,6 +160,54 @@ def test_register_rejects_peer_agent_attestation_for_non_agent_member(tmp_path):
 
     with pytest.raises(ValueError, match="peer agent principal must be a configured agent member"):
         plugin.register(registry)
+
+
+def test_register_requires_remote_target_to_be_allowlisted_for_the_configured_peer(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path)
+    config["members"].append(
+        {
+            "principal": "pla",
+            "kind": "agent",
+            "display_name": "protoLabs Agent",
+            "role": "member",
+            "mention_token": "@PLA",
+            "host": "pc1",
+            "can_post": True,
+            "can_mention": False,
+        }
+    )
+    config["dispatch_targets"] = {"pla": {"remote_peer": "pc1"}}
+
+    with pytest.raises(ValueError, match="remote dispatch target must be allowlisted"):
+        plugin.register(FakeRegistry(config))
+
+    config["peer_agent_principals"] = ["pla"]
+    registry = FakeRegistry(config)
+    plugin.register(registry)
+    assert len(registry.routers) == 2
+
+
+def test_register_rejects_remote_target_owned_by_another_peer(tmp_path):
+    plugin = _load_plugin()
+    config = _config(tmp_path)
+    config["members"].append(
+        {
+            "principal": "pla",
+            "kind": "agent",
+            "display_name": "protoLabs Agent",
+            "role": "member",
+            "mention_token": "@PLA",
+            "host": "pc1",
+            "can_post": True,
+            "can_mention": False,
+        }
+    )
+    config["peer_agent_principals"] = ["pla"]
+    config["dispatch_targets"] = {"pla": {"remote_peer": "other-peer"}}
+
+    with pytest.raises(ValueError, match="configured peer"):
+        plugin.register(FakeRegistry(config))
 
 
 def test_register_configured_dispatch_target_adds_one_worker_surface(tmp_path):

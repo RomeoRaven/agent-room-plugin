@@ -64,8 +64,8 @@ def test_client_service_background_poll_imports_remote_mentions_once_and_advance
         def __init__(self):
             self.afters = []
 
-        def execute(self, operation, payload, *, source_principal=None):
-            assert operation == "room.sync" and source_principal is None
+        def execute(self, operation, payload):
+            assert operation == "room.sync"
             self.afters.append(payload["after"])
             if payload["after"] < 21:
                 return {"messages": [message], "mentions": [mention], "next_sequence": 21, "has_more": False}

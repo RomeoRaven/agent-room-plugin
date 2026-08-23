@@ -74,9 +74,9 @@ Agent Room is split across clear internal owners behind one Fleet Room chat prod
 | Optional Rooms rail exposure | A second navigation path to the same backend; retained during development and judged separately from the product and transport architecture |
 | Agent Room plugin, owner mode | Canonical Room database, lifecycle, search, membership, message ordering, mention resolution, delivery state, attributed replies |
 | Agent Room plugin, client mode | Deterministic owner calls, pending-post outbox, acknowledgement and delivery cursors, local mention claims |
-| Proposed core `federation_paths` seam | Lets a plugin expose only its own declared route prefix to federation trust while keeping operator APIs unavailable |
-| Current `agent-room-v1` A2A contract | Proven development bridge for model-free `post`, `sync`, `ack`, and `members`; removed after federation-route migration |
-| Named delegate host service | Stable per-room, per-thread ACP session dispatch |
+| Released core `federation_paths` seam | Lets the plugin expose only `/api/plugins/agent-room/v1/` to federation trust while keeping operator APIs unavailable |
+| Agent Room federation contract | One bounded authenticated HTTPS request/response for model-free `post`, `sync`, `ack`, and `members` |
+| Named delegate host service | Stable per-room, per-thread ACP session dispatch with an explicit host-enforced read-only ceiling |
 | Host roster adapter | Live principal resolution, owner context, roster hashes, admission state |
 | Deployment owner | Private transport, TLS trust, credentials, service lifecycle, rollback |
 
@@ -90,28 +90,24 @@ Generic console work lives in the protoAgent repository. Generic Room behavior l
 
 ## Upstream federation direction
 
-The v0.7 client uses a deterministic A2A skill handler because federation credentials cannot call operator-protected plugin `/api` routes. Upstream protoAgent issue [#2747](https://github.com/protoLabsAI/protoAgent/issues/2747#issuecomment-5382744975) confirmed that this was a real core auth gap and that the A2A bridge was the only safe route available.
+ProtoAgent v0.146.0 ships `federation_paths`, the scoped route seam agreed in upstream issue [#2747](https://github.com/protoLabsAI/protoAgent/issues/2747#issuecomment-5382744975). Agent Room v0.8 declares only `/api/plugins/agent-room/v1/`; the endpoint still requires a valid credential while every other `/api` route remains operator-only.
 
-The proposed permanent substrate is `federation_paths`, a manifest key modeled after `public_paths`. A plugin may declare which of its own route prefixes lower the auth ceiling from operator to federation trust. Agent Room can then use a normal plugin HTTPS endpoint without giving the client an operator bearer and without wrapping deterministic RPC in an A2A task envelope.
+The client now uses one normal plugin HTTPS request without an operator bearer or A2A task envelope. The host propagates the verified trust tier. Operator requests bind the configured local principal; federation requests bind the configured peer. Remote agent authorship is derived from canonical mention state and the peer-agent allowlist, never a caller field.
 
 The migration contract is:
 
-1. protoAgent lands and documents `federation_paths` with plugin-prefix validation and trust-tier propagation;
+1. protoAgent v0.146.0 provides plugin-prefix validation and trust-tier propagation;
 2. Agent Room declares only its deterministic owner route as federation-accessible;
-3. owner mode binds its fixed configured peer identity server-side;
-4. client mode replaces the A2A JSON-RPC transport with plain authenticated HTTPS;
-5. the old handler and envelope are removed after parity proof;
-6. the full Room acceptance restarts from the first criterion on the migrated revision.
+3. owner mode binds fixed configured identities server-side;
+4. client mode uses plain bounded authenticated HTTPS;
+5. Agent Room A2A handler, task envelope, polling, and caller attestation are absent from active source;
+6. the full Room acceptance restarts from the first criterion after exact migrated development deployment.
 
 The two transports will not remain as permanent alternatives.
 
-## Release blockers discovered during review
+## Release hygiene closed in the v0.8 candidate
 
-Before the next release or final acceptance:
-
-- remove the installation hostname from the public `capabilities.network` default;
-- replace the misleading stock `0.142.1` compatibility floor with the first upstream revision that actually provides the required seams;
-- enforce a read-only runtime policy for local Room delegates instead of relying only on a prompt that requests no mutation.
+The public network capability is generic, the compatibility floor is protoAgent 0.146.0, and both local and roster-backed Room delegates are invoked with `permissions="readonly"`. Installed development qualification and final Room acceptance remain separate gates.
 
 Per-peer identity lifecycle remains an adjacent federation concern rather than part of this fixed two-host migration.
 
@@ -126,7 +122,7 @@ Complete and merged.
 - Config-bound members and author identity.
 - Monotonic member cursors.
 - Gated local API.
-- Deterministic A2A operations.
+- Deterministic local and federation HTTP operations.
 - Backend-only plugin boundary.
 
 ### Local exact-mention replies
@@ -208,7 +204,7 @@ The current slice connects an exact Room mention to an authoritative agent owned
 7. protoAgent opens or resumes one read-only ACP session keyed by room, thread, and agent.
 8. The agent receives the preloaded owner context and the bounded Room thread. Room reply tools are forbidden.
 9. The client resolves and hashes the roster again before attribution.
-10. The authenticated peer attests the allowlisted agent in the A2A envelope.
+10. The client submits no author identity; the owner derives the allowlisted agent from the canonical pending mention.
 11. The owner atomically inserts the reply and completes the matching mention.
 
 ### Safety rules
@@ -246,7 +242,7 @@ Live qualification has proven:
 
 The first live model turn exposed a service-context shell-read problem. The agent eventually produced the requested answer, but its read tools stalled past the Room reply deadline. The accepted correction preloads the exact bounded owner files through the roster adapter and forbids Room reply tool use. The corrected path returned the requested reply through the same persistent ACP session in a few seconds.
 
-The roster-backed path is merged in v0.7.0 and passed installed-host plus exact-merged replay on the current A2A bridge. That proof remains the regression baseline for the federation-route migration.
+The roster-backed path passed installed-host and exact-merged replay on the v0.7 bridge. That proof remains the regression baseline; v0.8 source migration is complete but exact migrated development deployment has not yet run.
 
 ## Acceptance
 
@@ -269,11 +265,11 @@ Development-bridge status: passed.
 - process cleanup leaves no orphan delegate tree;
 - stable unrelated runtimes remain unchanged.
 
-These criteria must pass again after `federation_paths` replaces the A2A bridge.
+These criteria must pass again after exact v0.8 host/plugin development deployment.
 
 ### Cross-host Room acceptance
 
-Status: paused at `ROOM_REWORK` pending transport migration.
+Status: paused at `ROOM_REWORK` pending exact migrated development deployment and full acceptance restart.
 
 Step 8 paused at `ROOM_REWORK` after this exact checkpoint on the bridge:
 
@@ -299,17 +295,13 @@ The project receives `ROOM_ACCEPTED` only after the complete scenario passes on 
 
 ## Next milestones
 
-### 1. Land the upstream federation substrate
+### 1. Qualify and publish the v0.8 source migration
 
-Confirm the final `federation_paths` contract, compatibility floor, trust-tier propagation, and accepted named-delegate host seam.
+Repository gates and isolated exact-host v0.146 loader/auth qualification pass. Complete exact-head review/CI and merge the immutable plugin revision. Do not imply development deployment from source qualification.
 
-### 2. Migrate and harden the plugin
+### 2. Deploy exact migrated revisions to isolated development runtimes
 
-- replace A2A JSON-RPC client transport with the federation-authenticated plugin route;
-- remove the deterministic A2A handler after parity proof;
-- remove the installation hostname from public defaults;
-- set an honest compatibility floor;
-- enforce read-only local Room delegates at runtime.
+Preserve both databases and rollback, adapt only the narrow federation route, and run the bounded retained-capability regression bundle.
 
 ### 3. Restart complete shared Room acceptance
 

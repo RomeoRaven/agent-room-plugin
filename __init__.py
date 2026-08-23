@@ -9,24 +9,24 @@ from typing import cast
 
 try:  # package load under protoAgent
     from .api import build_router
-    from .client import A2APeer, ClientRoomService, ClientState, PeerReconciler
+    from .client import ClientRoomService, ClientState, FederationPeer, PeerReconciler
     from .client_dispatch import ClientMentionSurface, ClientMentionWorker
     from .client_api import build_client_router
     from .dispatch import MentionSurface, MentionWorker
+    from .federation import build_federation_router
     from .operations import RoomOperations
     from .resolver import RosterResolver
     from .store import RoomStore
-    from .transport import SKILL_ID, build_handler
 except ImportError:  # host-free pytest imports root __init__ directly
     from api import build_router
-    from client import A2APeer, ClientRoomService, ClientState, PeerReconciler
+    from client import ClientRoomService, ClientState, FederationPeer, PeerReconciler
     from client_dispatch import ClientMentionSurface, ClientMentionWorker
     from client_api import build_client_router
     from dispatch import MentionSurface, MentionWorker
+    from federation import build_federation_router
     from operations import RoomOperations
     from resolver import RosterResolver
     from store import RoomStore
-    from transport import SKILL_ID, build_handler
 
 
 def _data_dir(config: dict) -> Path:
@@ -51,7 +51,7 @@ def register(registry) -> None:
         data_dir = _data_dir(config)
         state = ClientState(data_dir / "agent-room-client.db")
         dispatch_targets = config.get("dispatch_targets") if isinstance(config.get("dispatch_targets"), dict) else {}
-        peer = A2APeer(
+        peer = FederationPeer(
             str(config.get("peer_url") or ""),
             Path(str(config.get("peer_token_file") or "")).expanduser(),
             timeout=float(config.get("peer_timeout_seconds") or 30),
@@ -97,7 +97,7 @@ def register(registry) -> None:
                 max_output_bytes=int(resolver_config.get("max_output_bytes") or 65536),
                 env=resolver_config.get("env") if isinstance(resolver_config.get("env"), dict) else None,
             )
-            typed_invoke = cast(Callable[[str, str, str], Awaitable[str]], invoke_delegate)
+            typed_invoke = cast(Callable[..., Awaitable[str]], invoke_delegate)
             client_surface = ClientMentionSurface(
                 ClientMentionWorker(
                     state,
@@ -141,21 +141,27 @@ def register(registry) -> None:
             invoke_delegate = getattr(host, "invoke_delegate", None)
             if not callable(invoke_delegate):
                 raise RuntimeError("configured local Room dispatch requires the named-delegate host service")
-            typed_invoke = cast(Callable[[str, str, str], Awaitable[str]], invoke_delegate)
+            typed_invoke = cast(Callable[..., Awaitable[str]], invoke_delegate)
             surface = MentionSurface(
                 MentionWorker(store, invoke_delegate=typed_invoke, resolve_mentions=operations.resolve_mentions)
             )
             registry.register_surface(surface.start, surface.stop, name="mention-delivery")
 
-    # No configured peer means local owner mode only. Do not advertise a skill
-    # whose request would otherwise fall through to the normal model loop.
+    # No configured peer means local owner mode only. Do not mount a federation
+    # route whose server-bound identity would otherwise be undefined.
     if not peer_principal:
+        if dispatch_targets and any(
+            isinstance(target, dict) and str(target.get("remote_peer") or "").strip()
+            for target in dispatch_targets.values()
+        ):
+            raise ValueError("remote dispatch targets require a configured peer_principal")
         return
     if not store.is_member(room_id="ao", principal=peer_principal):
         raise ValueError(f"peer_principal {peer_principal!r} must be a configured room member")
     room_members = {member["principal"]: member for member in store.members(room_id="ao")}
     peer_member = room_members[peer_principal]
-    for agent_principal in peer_agent_principals:
+    allowed_peer_agents = {str(value).strip() for value in peer_agent_principals if str(value).strip()}
+    for agent_principal in allowed_peer_agents:
         agent_member = room_members.get(str(agent_principal))
         if (
             agent_member is None
@@ -164,22 +170,20 @@ def register(registry) -> None:
             or agent_member["host"] != peer_member["host"]
         ):
             raise ValueError("each peer agent principal must be a configured agent member on the peer host")
-    if not callable(getattr(registry, "register_a2a_handler", None)):
-        raise RuntimeError("protoAgent host lacks deterministic A2A handler support")
-
-    registry.register_a2a_skill(
-        {
-            "id": SKILL_ID,
-            "name": "Agent Room",
-            "description": "Deterministic durable room post, sync, acknowledgement, and membership operations.",
-            "tags": ["room", "collaboration", "deterministic"],
-        }
-    )
-    registry.register_a2a_handler(
-        SKILL_ID,
-        build_handler(
+    for principal, target in dispatch_targets.items():
+        remote_peer = str(target.get("remote_peer") or "").strip() if isinstance(target, dict) else ""
+        if not remote_peer:
+            continue
+        if remote_peer != peer_principal:
+            raise ValueError("each remote dispatch target must belong to the configured peer")
+        if str(principal) not in allowed_peer_agents:
+            raise ValueError("each remote dispatch target must be allowlisted as a peer agent principal")
+    registry.register_router(
+        build_federation_router(
             operations,
+            local_principal=local_principal,
             peer_principal=peer_principal,
-            peer_agent_principals={str(value).strip() for value in peer_agent_principals if str(value).strip()},
+            peer_agent_principals=allowed_peer_agents,
         ),
+        prefix="/api/plugins/agent-room",
     )

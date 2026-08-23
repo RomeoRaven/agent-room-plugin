@@ -4,7 +4,7 @@ Read this before changing anything. This repository is the durable backend owner
 
 ## Current accepted scope
 
-Version 0.7.x owns migration-safe subject rooms, deterministic peer-client state, roster-bound client dispatch, and model-free operations for:
+Version 0.8.x owns migration-safe subject rooms, deterministic federation peer-client state, roster-bound client dispatch, and model-free operations for:
 
 - `room.list` / `room.create` / `room.rename` — discover and manage subject rooms;
 - `room.archive` / `room.restore` / `room.reset` — reversible read-only archive and non-destructive Start fresh;
@@ -16,9 +16,9 @@ Version 0.7.x owns migration-safe subject rooms, deterministic peer-client state
 
 `room.members` adds a derived `mentionable` boolean. It is true only when the member principal is bound to a configured local dispatch target. It does not claim runtime presence or expose the delegate route name.
 
-The plugin exposes a bearer-gated local router at `/api/plugins/agent-room` and, only when `peer_principal` is configured as a member, advertises/handles deterministic A2A skill `agent-room-v1`.
+The plugin exposes an operator-gated local router at `/api/plugins/agent-room` and, only when `peer_principal` is configured as a member, a federation-authenticated `POST /api/plugins/agent-room/v1/execute` route for `post`, `sync`, `ack`, and `members`.
 
-When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. One source message may address multiple explicit targets in token order; one source/target pair remains unique. The worker invokes only through `PluginHost.invoke_delegate`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP/A2A.
+When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. One source message may address multiple explicit targets in token order; one source/target pair remains unique. The worker invokes only through `PluginHost.invoke_delegate(..., permissions="readonly")`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP.
 
 Authorized agent replies may create child mentions. Every mention persists its root source message, parent mention, principal chain, hop count, and source-token position. Configured cycle, hop, and per-room/per-target rate controls create visible `blocked` records and never invoke the target.
 
@@ -26,28 +26,28 @@ Authorized agent replies may create child mentions. Every mention persists its r
 
 | Path | Owner |
 |---|---|
-| `__init__.py` | Plugin registration, trusted config binding, instance data path, conditional A2A admission. |
+| `__init__.py` | Plugin registration, trusted config binding, instance data path, conditional federation route admission. |
 | `store.py` | Stdlib SQLite schema and durable ordering/dedup/member/cursor state. No host imports. |
-| `operations.py` | Single versioned operation dispatcher shared by HTTP and A2A; caller identity is never accepted from payload. |
+| `operations.py` | Single versioned operation dispatcher shared by local and federation HTTP; caller identity is never accepted from payload. |
 | `dispatch.py` | Lifecycle-managed pending mention worker and bounded `room_reply` prompt. |
 | `api.py` | Gated plugin API; room comes from URL and principal from plugin config. |
-| `transport.py` | A2A metadata validation and structured DataPart response; peer principal is host-configured. |
-| `client.py` | Optional HTTPS A2A client, pending-post/cursor/local-dispatch SQLite state, and reconciliation surface. |
+| `federation.py` | Trust-tier binding, exact envelope validation, transport operation ceiling, and canonical mention-derived remote agent attribution. |
+| `client.py` | Optional bounded HTTPS federation client, pending-post/cursor/local-dispatch SQLite state, and reconciliation surface. |
 | `client_dispatch.py` | Live roster-bound client mention claim, bounded context, ACP wake, source recheck, and exact attributed reply. |
 | `resolver.py` | Fixed-argv bounded stdin/JSON bridge to the host-owned roster resolver. |
 | `client_api.py` | Fixed-room local API adapter for the native PC1 Room UI; no lifecycle/search or canonical storage. |
-| `tests/` | Host-free store, operation, API, A2A, registration, and manifest proof. |
+| `tests/` | Host-free store, operation, local/federation API, client, registration, and manifest proof. |
 
 ## Rules
 
 - Keep the repository backend-only; do not add a second Room UI.
 - Keep `enabled: false` by default.
-- Never trust `principal`, `author`, `source`, or similar identity fields from request payloads. An authenticated peer may attest only an owner-allowlisted agent principal in the envelope, only for a post that completes that principal's existing canonical remote mention.
+- Never trust `principal`, `author`, `source`, or similar identity fields from request payloads or envelopes. Operator/federation identity comes from `request.state.trust_tier`; a remote agent author is derived only from an existing canonical remote mention and the configured peer-agent allowlist.
 - Only the canonical Room owner assigns per-room message sequence numbers and may change room lifecycle.
 - Preserve stable client-message deduplication; conflicting content under one id must fail.
 - Archive and Start fresh must fail while agent delivery is pending; archived rooms reject new posts but preserve idempotent retries of already accepted messages.
 - Start fresh never deletes messages. Earlier history remains bounded, searchable, and available on explicit request.
-- Client mode may consume a pre-provisioned private HTTPS route and directional credential; it never provisions routes/secrets or expands A2A beyond post/sync/ack/members.
+- Client mode may consume a pre-provisioned private HTTPS federation route and directional credential; it never provisions routes/secrets or exposes lifecycle/search remotely.
 - No attachments, reactions, per-room roster administration, permanent deletion, autonomous unmentioned response, general execution, approval engine, or Fleet lifecycle in this slice.
 - Installation-specific principal/delegate names belong only in local config; public defaults remain empty.
 - `@all` is forbidden. Unmentioned agents are silent. One source/target pair creates at most one useful turn/reply.
@@ -58,7 +58,7 @@ Authorized agent replies may create child mentions. Every mention persists its r
 
 ## Local-first and optional peer ownership
 
-The standalone, single-instance Room is the primary complete product path. `peer_principal` defaults empty; local Room storage, native UI, and local delegate mentions must remain fully usable without A2A admission or any cross-device configuration.
+The standalone, single-instance Room is the primary complete product path. `peer_principal` defaults empty; local Room storage, native UI, and local delegate mentions must remain fully usable without federation route admission or any cross-device configuration.
 
 Keep multi-device concerns outside the local core:
 
@@ -70,7 +70,7 @@ Keep multi-device concerns outside the local core:
 | Pending-post outbox, cursor state, deterministic reconciliation, local dispatch claim | Plugin client mode |
 | Authoritative agent identity and principal-to-runtime binding | Host-local roster adapter |
 
-The conditional owner-side `agent-room-v1` A2A handler and client-side caller remain deterministic adapters over `post`, `sync`, `ack`, and `members` only. Lifecycle and search stay owner-local. Client state contains pending posts, cursors, and local dispatch claims only; it never caches canonical messages, assigns sequence numbers, provisions routes, distributes credentials, or becomes a second Room owner. Roster identity is resolved live from the host adapter and is not copied into client state.
+The conditional owner-side federation route and client-side HTTPS caller remain deterministic adapters over `post`, `sync`, `ack`, and `members` only. Lifecycle and search stay owner-local. Client state contains pending posts, cursors, and local dispatch claims only; it never caches canonical messages, assigns sequence numbers, provisions routes, distributes credentials, or becomes a second Room owner. Roster identity is resolved live from the host adapter and is not copied into client state.
 
 ## Gate
 

@@ -109,7 +109,7 @@ Some overlap is visual, not architectural.
 - unread and acknowledgement cursors;
 - archive, restore, Start fresh, pagination, and search;
 - client pending-post and delivery reconciliation;
-- host-attested agent reply attribution.
+- canonical-mention-derived agent reply attribution.
 
 Neither system should copy the other's authoritative database.
 
@@ -123,7 +123,7 @@ Keeping it in an external plugin provides a cleaner product boundary:
 - the backend can evolve without creating a second frontend;
 - installation-specific members, routes, delegates, and credentials stay in local configuration;
 - shared behavior remains generic enough for other protoAgent users;
-- the protoAgent core only needs reusable host seams such as plugin routes, named delegates, ACP sessions, and A2A handlers.
+- the protoAgent core only needs reusable host seams such as federation-scoped plugin routes, named delegates, and ACP sessions.
 
 ## Identity and trust
 
@@ -165,14 +165,14 @@ This avoids pretending that unrelated per-agent histories were once a single con
 
 ## Federation transport direction
 
-The v0.7 client uses a deterministic A2A skill handler because federation credentials cannot call operator-protected plugin `/api` routes. Upstream protoAgent issue [#2747](https://github.com/protoLabsAI/protoAgent/issues/2747#issuecomment-5382744975) confirmed that was the only safe door available and proposed a cleaner permanent seam: `federation_paths`.
+Version 0.8 uses the `federation_paths` seam released in protoAgent v0.146.0. The plugin lowers only `/api/plugins/agent-room/v1/` from operator trust to federation trust; the endpoint remains authenticated and every other operator API stays unavailable to the federation credential.
 
-Under that proposal, a plugin may lower only its own declared route prefix from operator trust to federation trust. Agent Room client mode can then use a plain authenticated HTTPS POST while the server binds the fixed peer identity. The custom A2A JSON-RPC and task envelope become unnecessary.
+Client mode uses one bounded authenticated HTTPS POST. The host supplies the verified trust tier, the plugin binds the configured peer principal, and remote agent attribution is derived from canonical pending mention state plus the peer-agent allowlist. No caller sends its own principal.
 
-The current A2A path remains a proven development bridge. It should be removed after `federation_paths` lands and the plugin migration passes the full Room acceptance. Both transports should not remain as permanent alternatives.
+The Agent Room A2A handler, JSON-RPC wrapper, task polling, and client attestation fields are removed from active v0.8 source. Broader protoAgent A2A remains available for agentic collaboration outside deterministic Room synchronization.
 
 ## Current status
 
-The public plugin main branch includes v0.7.0 durable subject rooms, exact local and roster-backed remote mention delivery, bounded agent chains, lifecycle and search, deterministic client mode, persistent ACP session resume, and restart-safe reply behavior.
+The v0.8 candidate includes durable subject rooms, exact local and roster-backed remote mention delivery, bounded agent chains, lifecycle and search, federation client mode, host-enforced read-only delegate invocation, persistent ACP session resume, and restart-safe reply behavior.
 
-Final acceptance began on the A2A development bridge and passed shared parity, client-origin mention of an owner-side agent, owner-origin mention of a client-side agent, and ordered cross-host multiple mentions. It is now paused at `ROOM_REWORK`. The complete bundle must restart after the federation-route migration and three plugin hygiene fixes described in [the Agent Room plan](agent-room-plan.md).
+Source migration, host-free tests, and isolated exact-host v0.146 loader/auth qualification are complete, but installed development deployment and final acceptance have not run. Prior bridge parity and mention results remain regression evidence only. The complete Room acceptance must restart from its first criterion after exact migrated host/plugin deployment.
