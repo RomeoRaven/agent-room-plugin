@@ -102,17 +102,33 @@ class RoomOperations:
         body: str,
         parent_mention: dict | None = None,
     ) -> list[dict]:
-        if re.search(r"(?<!\w)@all(?!\w)", body, flags=re.IGNORECASE):
-            raise ValueError("@all broadcast is not supported")
         members = self.store.members(room_id=room_id)
         source = next((member for member in members if member["principal"] == principal), None)
+        all_match = re.search(r"(?<!\w)@all(?!\w)", body, flags=re.IGNORECASE)
+        if all_match and (source is None or source["kind"] not in {"human", "host"} or not source["can_mention"]):
+            raise PermissionError(f"principal {principal!r} may not use @all")
         candidates = []
         parent_chain = [str(item) for item in (parent_mention or {}).get("origin_chain", [])]
         parent_hop = int((parent_mention or {}).get("hop_count") or 0)
         cutoff = (datetime.now(timezone.utc) - timedelta(seconds=self.rate_window_seconds)).isoformat()
-        for member in members:
+        for roster_order, member in enumerate(members):
             target = self.dispatch_targets.get(str(member["principal"]).casefold())
             if target is None:
+                continue
+            if all_match:
+                if member["kind"] != "agent":
+                    continue
+                candidates.append(
+                    {
+                        "target_principal": str(member["principal"]),
+                        "token": "@all",
+                        "delegate_name": str(target["delegate"]).strip(),
+                        "position": all_match.start(),
+                        "_end": all_match.end(),
+                        "_roster_order": roster_order,
+                        "_broadcast": True,
+                    }
+                )
                 continue
             if source is not None and source["kind"] == "agent" and target.get("remote_peer"):
                 continue
@@ -125,6 +141,8 @@ class RoomOperations:
                         "delegate_name": str(target["delegate"]).strip(),
                         "position": match.start(),
                         "_end": match.end(),
+                        "_roster_order": roster_order,
+                        "_broadcast": False,
                     }
                 )
         if candidates and (source is None or not source["can_mention"]):
@@ -136,16 +154,18 @@ class RoomOperations:
             key=lambda mention: (
                 mention["position"],
                 -(mention["_end"] - mention["position"]),
-                mention["target_principal"],
+                mention["_roster_order"],
             ),
         ):
             if any(
-                candidate["position"] < existing["_end"] and candidate["_end"] > existing["position"]
+                not (candidate["_broadcast"] and existing["_broadcast"])
+                and candidate["position"] < existing["_end"]
+                and candidate["_end"] > existing["position"]
                 for existing in selected
             ):
                 continue
             selected.append(candidate)
-        selected.sort(key=lambda mention: (mention["position"], mention["target_principal"]))
+        selected.sort(key=lambda mention: (mention["position"], mention["_roster_order"]))
         unique_targets = []
         seen_targets = set()
         for candidate in selected:

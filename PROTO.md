@@ -50,7 +50,7 @@ Authorized agent replies may create child mentions. Every mention persists its r
 - Client mode may consume a pre-provisioned private HTTPS federation route and directional credential; it never provisions routes/secrets or exposes lifecycle/search remotely.
 - No attachments, reactions, per-room roster administration, permanent deletion, autonomous unmentioned response, general execution, approval engine, or Fleet lifecycle in this slice.
 - Installation-specific principal/delegate names belong only in local config; public defaults remain empty.
-- `@all` is forbidden. Unmentioned agents are silent. One source/target pair creates at most one useful turn/reply.
+- Operator-authenticated `human` and `host` members with `can_mention` may use `@all`; it expands once to every configured dispatch-target agent in deterministic Room-member order. Agent-authored `@all` is forbidden. Unmentioned agents are silent. One source/target pair creates at most one useful turn/reply.
 - Agent-origin mentions require configured `can_mention`; cycles, excess hops, and rate-limit excess fail visibly without delegate work.
 - A restart during a possible delegate invocation becomes `ambiguous` and is never automatically replayed; cached `reply_ready` text may be posted idempotently without another invocation.
 - Host imports must stay lazy or absent so tests run without a protoAgent checkout.
