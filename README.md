@@ -90,8 +90,8 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Exact-host tested | v0.8 host-free suite plus real loader/auth/router qualification against the frozen RR v0.146 baseline; no deployed runtime was changed |
-| Windows | Prior bridge tested | v0.7 native acceptance is retained regression evidence; v0.8 native CI and installed development acceptance remain pending |
+| Linux | Tested | v0.8.2: 93-test host-free suite plus installed protoAgent v0.146 owner-mode qualification, including preserved cross-host agent-mention lineage |
+| Windows | Tested | v0.8.2: 93-test native Python 3.12.3 suite plus installed protoAgent v0.146 client-mode qualification and exact same-thread handoff |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.
