@@ -1,4 +1,4 @@
-"""Versioned model-free room operations shared by local API and A2A ingress."""
+"""Versioned model-free room operations shared by local and federation APIs."""
 
 from __future__ import annotations
 

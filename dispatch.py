@@ -21,7 +21,7 @@ class MentionWorker:
         self,
         store: RoomStore,
         *,
-        invoke_delegate: Callable[[str, str, str], Awaitable[str]],
+        invoke_delegate: Callable[..., Awaitable[str]],
         resolve_mentions: Callable[..., list[dict]] | None = None,
     ):
         self.store = store
@@ -58,6 +58,7 @@ class MentionWorker:
                     work["delegate_name"],
                     self._prompt(work),
                     f"{work['room_id']}:{work['source_generation']}:{work['source_thread_id']}",
+                    permissions="readonly",
                 )
                 work = {
                     **work,

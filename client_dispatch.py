@@ -27,7 +27,7 @@ class ClientMentionWorker:
         *,
         peer: Peer,
         resolver: Resolver,
-        invoke_delegate: Callable[[str, str, str], Awaitable[str]],
+        invoke_delegate: Callable[..., Awaitable[str]],
         targets: dict[str, dict],
     ) -> None:
         self.state = state
@@ -130,6 +130,7 @@ class ClientMentionWorker:
                     str(target["delegate"]),
                     self._prompt(record, context),
                     f"{work['room_id']}:{work['source_thread_id']}:{work['target_principal']}",
+                    permissions="readonly",
                 )
             except Exception:
                 log.warning("local Room ACP invocation failed (dispatch=%s)", work["dispatch_id"], exc_info=True)
@@ -160,7 +161,6 @@ class ClientMentionWorker:
             self.peer.execute,
             "room.post",
             payload,
-            source_principal=work["target_principal"],
         )
         message = self._validated_reply(result, work, body)
         self.state.complete_local_mention(work["dispatch_id"], str(message["id"]))

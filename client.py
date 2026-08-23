@@ -7,10 +7,9 @@ import asyncio
 import hashlib
 import json
 import ssl
-import time
 import urllib.error
+import urllib.parse
 import urllib.request
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
@@ -20,7 +19,7 @@ CONTRACT_VERSION = "1"
 
 
 class Peer(Protocol):
-    def execute(self, operation: str, payload: dict, *, source_principal: str | None = None) -> dict: ...
+    def execute(self, operation: str, payload: dict) -> dict: ...
 
 
 class PeerUnavailable(RuntimeError):
@@ -35,7 +34,10 @@ class PeerRejected(RuntimeError):
     pass
 
 
-class A2APeer:
+class FederationPeer:
+    DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+    ENDPOINT_SUFFIX = "/api/plugins/agent-room/v1/execute"
+
     def __init__(
         self,
         url: str,
@@ -43,34 +45,46 @@ class A2APeer:
         *,
         open_request=urllib.request.urlopen,
         timeout: float = 30,
-        poll_interval: float = 0.25,
-        max_polls: int = 120,
         ca_file: Path | None = None,
+        max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ) -> None:
         self.url = str(url or "").strip()
         self.token_file = Path(token_file)
         self.open_request = open_request
-        self.timeout = timeout
-        self.poll_interval = poll_interval
-        self.max_polls = max_polls
+        self.timeout = float(timeout)
+        self.max_response_bytes = int(max_response_bytes)
         self.ssl_context = ssl.create_default_context(cafile=str(ca_file)) if ca_file else None
-        if not self.url.startswith("https://"):
-            raise ValueError("peer_url must use https")
+        parsed = urllib.parse.urlsplit(self.url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or not parsed.path.endswith(self.ENDPOINT_SUFFIX)
+        ):
+            raise ValueError(
+                f"peer_url must be an HTTPS Agent Room federation endpoint ending in {self.ENDPOINT_SUFFIX}"
+            )
         if not self.token_file.is_file():
             raise ValueError("peer_token_file does not exist")
+        if self.max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be positive")
 
-    def _rpc(self, body: dict) -> dict:
-        token = self.token_file.read_text().strip()
-        if not token:
+    def execute(self, operation: str, payload: dict) -> dict:
+        value = self.token_file.read_text(encoding="utf-8").strip()
+        if not value:
             raise ValueError("peer credential is empty")
+        envelope = {
+            "contract_version": CONTRACT_VERSION,
+            "operation": str(operation or "").strip(),
+            "payload": payload,
+        }
         request = urllib.request.Request(
             self.url,
-            data=json.dumps(body).encode(),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "A2A-Version": "1.0",
-                "Content-Type": "application/json",
-            },
+            data=json.dumps(envelope, separators=(",", ":")).encode(),
+            headers={"Authorization": f"Bearer {value}", "Content-Type": "application/json"},
             method="POST",
         )
         try:
@@ -79,7 +93,7 @@ class A2APeer:
             else:
                 response_context = self.open_request(request, timeout=self.timeout)
             with response_context as response:
-                payload = json.loads(response.read())
+                raw = response.read(self.max_response_bytes + 1)
         except urllib.error.HTTPError as exc:
             if exc.code in {401, 403}:
                 raise PeerRejected(f"peer rejected request with HTTP {exc.code}") from exc
@@ -88,74 +102,17 @@ class A2APeer:
             raise PeerUnavailable(f"peer HTTP failure {exc.code}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise PeerUnavailable("room owner is unavailable") from exc
-        if payload.get("error"):
-            raise ValueError(f"peer A2A error: {payload['error']}")
-        return payload
-
-    @staticmethod
-    def _state(task: dict) -> str:
-        return str((task.get("status") or {}).get("state") or "")
-
-    @staticmethod
-    def _result(task: dict, operation: str) -> dict:
-        for artifact in task.get("artifacts") or []:
-            for part in artifact.get("parts") or []:
-                data = part.get("data")
-                if data is None and isinstance(part.get("content"), dict):
-                    data = part["content"].get("value")
-                if not isinstance(data, dict):
-                    continue
-                if data.get("contract_version") != CONTRACT_VERSION or data.get("operation") != operation:
-                    raise ValueError("peer returned a mismatched Agent Room envelope")
-                result = data.get("result")
-                if not isinstance(result, dict):
-                    raise ValueError("peer Agent Room result must be an object")
-                return result
-        raise ValueError("peer task completed without an Agent Room result")
-
-    def execute(self, operation: str, payload: dict, *, source_principal: str | None = None) -> dict:
-        call_id = uuid.uuid4().hex
-        envelope = {
-            "contract_version": CONTRACT_VERSION,
-            "operation": operation,
-            "payload": payload,
-        }
-        attested_source = str(source_principal or "").strip()
-        if attested_source:
-            envelope["source_principal"] = attested_source
-        send = self._rpc(
-            {
-                "jsonrpc": "2.0",
-                "id": "send",
-                "method": "SendMessage",
-                "params": {
-                    "message": {
-                        "messageId": call_id,
-                        "role": "ROLE_USER",
-                        "parts": [{"text": "deterministic agent-room operation"}],
-                    },
-                    "metadata": {
-                        "skillHint": "agent-room-v1",
-                        "agent_room": envelope,
-                    },
-                },
-            }
-        )
-        task = (send.get("result") or {}).get("task") or {}
-        task_id = task.get("id")
-        if not task_id:
-            raise ValueError("peer A2A response omitted task id")
-        for _ in range(self.max_polls):
-            state = self._state(task)
-            if state == "TASK_STATE_COMPLETED":
-                return self._result(task, operation)
-            if state in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}:
-                raise ValueError(f"peer Agent Room task ended in {state}")
-            if self.poll_interval:
-                time.sleep(self.poll_interval)
-            current = self._rpc({"jsonrpc": "2.0", "id": "get", "method": "GetTask", "params": {"id": task_id}})
-            task = (current.get("result") or {}).get("task") or current.get("result") or {}
-        raise PeerUnavailable("peer Agent Room task did not complete before timeout")
+        if len(raw) > self.max_response_bytes:
+            raise PeerUnavailable("peer Agent Room response exceeded the configured byte limit")
+        response = json.loads(raw)
+        if not isinstance(response, dict):
+            raise ValueError("peer Agent Room response must be an object")
+        if response.get("contract_version") != CONTRACT_VERSION or response.get("operation") != envelope["operation"]:
+            raise ValueError("peer returned a mismatched Agent Room envelope")
+        result = response.get("result")
+        if not isinstance(result, dict):
+            raise ValueError("peer Agent Room result must be an object")
+        return result
 
 
 class ClientState:

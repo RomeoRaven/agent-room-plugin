@@ -61,8 +61,8 @@ class FakePeer:
             },
         ]
 
-    def execute(self, operation, payload, *, source_principal=None):
-        self.calls.append((operation, payload, source_principal))
+    def execute(self, operation, payload):
+        self.calls.append((operation, payload))
         if operation == "room.sync":
             return {"messages": self.messages, "mentions": [], "next_sequence": 21, "has_more": False}
         assert operation == "room.post"
@@ -75,7 +75,7 @@ class FakePeer:
                 "body": payload["body"],
                 "thread_id": payload["thread_id"],
                 "reply_to_message_id": payload["reply_to_message_id"],
-                "author_principal": source_principal,
+                "author_principal": "pla",
                 "author_kind": "agent",
             },
             "completed_mention": {"id": payload["completes_mention_id"], "status": "completed"},
@@ -106,8 +106,8 @@ async def test_worker_resolves_live_wakes_exact_acp_session_once_and_posts_attri
     resolver = FakeResolver()
     calls = []
 
-    async def invoke(delegate, prompt, conversation_key):
-        calls.append((delegate, prompt, conversation_key))
+    async def invoke(delegate, prompt, conversation_key, *, permissions):
+        calls.append((delegate, prompt, conversation_key, permissions))
         return "STEP7B_MARKER"
 
     worker = ClientMentionWorker(
@@ -122,13 +122,14 @@ async def test_worker_resolves_live_wakes_exact_acp_session_once_and_posts_attri
     assert await worker.run_once() is False
     assert resolver.calls == ["PLA", "PLA"]
     assert len(calls) == 1
-    delegate, prompt, conversation_key = calls[0]
+    delegate, prompt, conversation_key, permissions = calls[0]
     assert delegate == "pla-room" and conversation_key == "ao:thread-1:pla"
+    assert permissions == "readonly"
     assert AGENT["start_here"] in prompt and "Earlier context" in prompt and "@PLA return STEP7B_MARKER" in prompt
     assert "PRELOADED PLA OWNER CONTEXT" in prompt
     assert "Do not invoke tools" in prompt
     post = peer.calls[-1]
-    assert post[0] == "room.post" and post[2] == "pla"
+    assert post[0] == "room.post" and len(post) == 2
     assert post[1]["client_message_id"] == "mention-reply:mention-1"
     assert post[1]["thread_id"] == "thread-1" and post[1]["reply_to_message_id"] == "source"
     assert post[1]["completes_mention_id"] == "mention-1"
@@ -142,7 +143,7 @@ async def test_worker_refuses_attribution_when_roster_record_changes_during_disp
     changed = {**AGENT, "record_sha256": "b" * 64}
     resolver = FakeResolver([AGENT, changed])
 
-    async def invoke(_delegate, _prompt, _conversation_key):
+    async def invoke(_delegate, _prompt, _conversation_key, *, permissions):
         return "must not be attributed"
 
     worker = ClientMentionWorker(
