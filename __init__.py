@@ -120,10 +120,8 @@ def register(registry) -> None:
 
     store = RoomStore(_data_dir(config) / "agent-room.db", owner=owner, members=members)
     operations = RoomOperations(store, dispatch_targets=dispatch_targets, mention_policy=mention_policy)
-    registry.register_router(
-        build_router(operations, local_principal=local_principal),
-        prefix="/api/plugins/agent-room",
-    )
+    owner_router = build_router(operations, local_principal=local_principal)
+    registry.register_router(owner_router, prefix="/api/plugins/agent-room")
 
     if dispatch_targets:
         local_targets = {}
@@ -178,12 +176,11 @@ def register(registry) -> None:
             raise ValueError("each remote dispatch target must belong to the configured peer")
         if str(principal) not in allowed_peer_agents:
             raise ValueError("each remote dispatch target must be allowlisted as a peer agent principal")
-    registry.register_router(
+    owner_router.include_router(
         build_federation_router(
             operations,
             local_principal=local_principal,
             peer_principal=peer_principal,
             peer_agent_principals=allowed_peer_agents,
-        ),
-        prefix="/api/plugins/agent-room",
+        )
     )
