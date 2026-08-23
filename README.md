@@ -38,6 +38,7 @@ Fleet runs and operates many agents. Agent Room supplies the durable conversatio
 - Live host-roster admission for configured client-side agent targets
 - Durable hash-keyed local mention claims with no replay after ambiguous ACP interruption
 - Canonical-mention-derived, owner-allowlisted agent attribution for one same-thread reply
+- Context-bound client-agent handoffs that may repeat one exact named Room token while retaining read-only execution, owner-side mention authorization, and `@all` rejection
 - Disabled by default
 
 Dispatch is generic and opt-in. Installation-specific names stay in local configuration:
@@ -57,7 +58,7 @@ agent_room:
 
 Each owner-side dispatch principal must also be a configured Room member. A target binds either one local named delegate or one remote peer, never both. A configured client-side target resolves its exact code from a fixed host-owned stdin/JSON resolver before and after one named-delegate ACP turn invoked with the host-enforced `permissions="readonly"` ceiling. Multiple explicit tokens in one message create one ordered durable mention per target; repeated tokens for the same target still create one mention. Delegate identity plus the Room/thread conversation key keeps ACP sessions separate. Plain text wakes nobody and `@all` remains rejected.
 
-An agent with `can_mention: true` may mention another configured agent from its Room reply. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
+An agent with `can_mention: true` may mention another configured agent from its Room reply. A client-side roster agent may repeat one exact named Room token already present in its bounded thread context when that context explicitly requests a handoff; it may not invent tokens or emit `@all`. The owner remains authoritative for member capability, dispatch admission, attribution, and mention-chain controls. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
 
 New rooms inherit the installation's configured owner/member roster. Archive is read-only but reversible. Start fresh advances the default visible-history boundary without deleting messages; earlier history remains paged, searchable, and restart-safe. Archive and Start fresh refuse rooms with pending agent delivery. Permanent message/room deletion is deliberately absent.
 

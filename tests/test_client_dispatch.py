@@ -98,6 +98,17 @@ def queue(state):
     )
 
 
+def test_delegate_prompt_allows_one_context_bound_room_handoff_without_relaxing_safety():
+    prompt = ClientMentionWorker._prompt(AGENT, FakePeer().messages)
+
+    assert "may repeat that exact token once" in prompt
+    assert "Do not invent mention tokens" in prompt
+    assert "Never emit @all" in prompt
+    assert "Do not invoke tools" in prompt
+    assert "Do not mutate files" in prompt
+    assert "Do not emit @mention tokens" not in prompt
+
+
 @pytest.mark.asyncio
 async def test_worker_resolves_live_wakes_exact_acp_session_once_and_posts_attributed_same_thread_reply(tmp_path):
     state = ClientState(tmp_path / "client.db")

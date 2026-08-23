@@ -1,6 +1,6 @@
 id: agent-room
 name: Agent Room Backend
-version: 0.8.1
+version: 0.8.2
 description: >-
   Durable model-free shared-room owner and deterministic peer client for protoAgent: subject rooms,
   lifecycle, bounded history, indexed search, ordered messages, stable
