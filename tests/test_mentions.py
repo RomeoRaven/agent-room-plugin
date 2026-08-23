@@ -658,3 +658,24 @@ def test_agent_authored_all_is_rejected_before_room_admission(tmp_path):
         )
 
     assert store.sync(room_id="ao", after=0, limit=10)["messages"] == []
+
+
+@pytest.mark.parametrize("body", ["Unknown @all.foo", "Unknown @all-team", "Unknown @all_team"])
+def test_all_prefix_inside_unknown_token_does_not_broadcast(tmp_path, body):
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES, HEADROOM])
+    operations = RoomOperations(
+        store,
+        dispatch_targets={
+            "hermes": {"delegate": "hermes_s1"},
+            "headroom": {"delegate": "headroom_s1"},
+        },
+    )
+
+    posted = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": f"unknown-{body[-3:]}", "body": body},
+        principal="dennis",
+    )["result"]
+
+    assert posted["mentions"] == []
+    assert len(store.sync(room_id="ao", after=0, limit=10)["messages"]) == 1

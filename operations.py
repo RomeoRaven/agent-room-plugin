@@ -11,6 +11,9 @@ except ImportError:  # host-free direct module tests
     from store import RoomStore
 
 
+_ALL_TOKEN = re.compile(r"(?<![^\s(\[{])@all(?![^\s,;:!?()[\]{}])", flags=re.IGNORECASE)
+
+
 CONTRACT_VERSION = "1"
 OPERATIONS = frozenset(
     {
@@ -104,7 +107,7 @@ class RoomOperations:
     ) -> list[dict]:
         members = self.store.members(room_id=room_id)
         source = next((member for member in members if member["principal"] == principal), None)
-        all_match = re.search(r"(?<!\w)@all(?!\w)", body, flags=re.IGNORECASE)
+        all_match = _ALL_TOKEN.search(body)
         if all_match and (source is None or source["kind"] not in {"human", "host"} or not source["can_mention"]):
             raise PermissionError(f"principal {principal!r} may not use @all")
         candidates = []
