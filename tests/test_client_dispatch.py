@@ -115,6 +115,24 @@ def test_delegate_prompt_allows_one_context_bound_room_handoff_without_relaxing_
     assert "Do not emit @mention tokens" not in prompt
 
 
+def test_reply_validation_allows_exact_dotted_owner_token():
+    body = "Done @Team.Agent"
+    context = [{"body": "@PLA hand off to @Team.Agent"}]
+    members = [{"mention_token": "@Team.Agent", "mentionable": True}]
+
+    assert ClientMentionWorker._validated_reply_body(body, context, members) == body
+
+
+def test_reply_validation_blocks_exact_owner_token_absent_from_context():
+    body = "Unexpected @"
+    context = [{"body": "@PLA do not hand off"}]
+    members = [{"mention_token": "@", "mentionable": True}]
+
+    assert ClientMentionWorker._validated_reply_body(body, context, members) == (
+        "Blocked: the authoritative local agent returned an unauthorized Room handoff."
+    )
+
+
 @pytest.mark.parametrize(
     "source_body,reply,expected",
     [

@@ -16,7 +16,7 @@ except ImportError:
 
 log = logging.getLogger("protoagent.plugins.agent_room.client_dispatch")
 _BLOCKED_HANDOFF = "Blocked: the authoritative local agent returned an unauthorized Room handoff."
-_MENTION_TOKEN = re.compile(r"(?<!\w)@[\w-]+(?!\w)")
+_GENERIC_MENTION_TOKEN = re.compile(r"(?<!\w)@[\w.-]+(?!\w)")
 
 
 class Resolver(Protocol):
@@ -102,23 +102,30 @@ class ClientMentionWorker:
 
     @staticmethod
     def _validated_reply_body(body: str, context: list[dict], members: list[dict]) -> str:
-        tokens = [match.group(0) for match in _MENTION_TOKEN.finditer(body)]
-        if not tokens:
+        candidates = []
+        for member in members:
+            token = str(member.get("mention_token") or "")
+            if not token:
+                continue
+            for match in re.finditer(rf"(?<!\w){re.escape(token)}(?!\w)", body, re.IGNORECASE):
+                candidates.append((match.start(), match.end(), token, member))
+        selected = []
+        for candidate in sorted(candidates, key=lambda item: (item[0], -(item[1] - item[0]), item[2].casefold())):
+            if any(candidate[0] < existing[1] and candidate[1] > existing[0] for existing in selected):
+                continue
+            selected.append(candidate)
+        unknown = [
+            match
+            for match in _GENERIC_MENTION_TOKEN.finditer(body)
+            if not any(match.start() >= known[0] and match.end() <= known[1] for known in selected)
+        ]
+        if not selected and not unknown:
             return body
-        if len(tokens) != 1:
+        if len(selected) != 1 or unknown:
             return _BLOCKED_HANDOFF
-        token = tokens[0].casefold()
-        member = next(
-            (
-                candidate
-                for candidate in members
-                if str(candidate.get("mention_token") or "").casefold() == token and bool(candidate.get("mentionable"))
-            ),
-            None,
-        )
-        if token == "@all" or member is None:
+        _, _, configured_token, member = selected[0]
+        if configured_token.casefold() == "@all" or not bool(member.get("mentionable")):
             return _BLOCKED_HANDOFF
-        configured_token = str(member["mention_token"])
         context_has_token = any(
             re.search(rf"(?<!\w){re.escape(configured_token)}(?!\w)", str(message.get("body") or ""), re.IGNORECASE)
             for message in context
