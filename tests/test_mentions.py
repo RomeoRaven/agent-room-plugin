@@ -609,18 +609,73 @@ async def test_restart_marks_interrupted_invocation_ambiguous_without_replay(tmp
     assert calls == 0
 
 
-def test_all_broadcast_is_rejected_at_room_admission(tmp_path):
-    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES])
+def test_operator_all_expands_once_to_every_wakeable_agent_in_roster_order(tmp_path):
+    pc1 = {
+        **OWNER,
+        "principal": "pc1",
+        "kind": "host",
+        "display_name": "PC1",
+        "mention_token": "@PC1",
+        "host": "pc1",
+    }
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HEADROOM, pc1, HERMES, OBSERVER])
     operations = RoomOperations(
         store,
-        dispatch_targets={"hermes": {"delegate": "hermes_s1"}},
+        dispatch_targets={
+            "hermes": {"delegate": "hermes_s1"},
+            "headroom": {"delegate": "headroom_s1"},
+        },
     )
 
-    with pytest.raises(ValueError, match="@all"):
+    posted = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "all-1", "body": "Wake @all and @Hermes"},
+        principal="pc1",
+    )["result"]
+
+    assert [(mention["target_principal"], mention["token"]) for mention in posted["mentions"]] == [
+        ("headroom", "@all"),
+        ("hermes", "@all"),
+    ]
+
+
+def test_agent_authored_all_is_rejected_before_room_admission(tmp_path):
+    source = {**HERMES, "can_mention": True}
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[source, HEADROOM])
+    operations = RoomOperations(
+        store,
+        dispatch_targets={
+            "hermes": {"delegate": "hermes_s1"},
+            "headroom": {"delegate": "headroom_s1"},
+        },
+    )
+
+    with pytest.raises(PermissionError, match="@all"):
         operations.execute(
             "room.post",
-            {"room_id": "ao", "client_message_id": "all-1", "body": "Wake @all"},
-            principal="dennis",
+            {"room_id": "ao", "client_message_id": "all-agent-1", "body": "Wake @all"},
+            principal="hermes",
         )
 
     assert store.sync(room_id="ao", after=0, limit=10)["messages"] == []
+
+
+@pytest.mark.parametrize("body", ["Unknown @all.foo", "Unknown @all-team", "Unknown @all_team"])
+def test_all_prefix_inside_unknown_token_does_not_broadcast(tmp_path, body):
+    store = RoomStore(tmp_path / "room.db", owner=OWNER, members=[HERMES, HEADROOM])
+    operations = RoomOperations(
+        store,
+        dispatch_targets={
+            "hermes": {"delegate": "hermes_s1"},
+            "headroom": {"delegate": "headroom_s1"},
+        },
+    )
+
+    posted = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": f"unknown-{body[-3:]}", "body": body},
+        principal="dennis",
+    )["result"]
+
+    assert posted["mentions"] == []
+    assert len(store.sync(room_id="ao", after=0, limit=10)["messages"]) == 1

@@ -39,15 +39,30 @@ PLA = {
     "can_post": True,
     "can_mention": False,
 }
+HERMES = {
+    "principal": "hermes",
+    "kind": "agent",
+    "display_name": "Hermes",
+    "role": "member",
+    "mention_token": "@Hermes",
+    "host": "s1",
+    "can_post": True,
+    "can_mention": True,
+}
 
 
 def _envelope(operation: str, payload: dict) -> dict:
     return {"contract_version": "1", "operation": operation, "payload": payload}
 
 
-def _client(tmp_path, *, allowed_agents=frozenset({"pla"})):
-    store = RoomStore(tmp_path / "agent-room.db", owner=OWNER, members=[PC1, PLA])
-    operations = RoomOperations(store, dispatch_targets={"pla": {"remote_peer": "pc1"}})
+def _client(tmp_path, *, allowed_agents=frozenset({"pla"}), pla_can_mention=False, include_hermes=False):
+    members = [PC1, {**PLA, "can_mention": pla_can_mention}]
+    targets = {"pla": {"remote_peer": "pc1"}}
+    if include_hermes:
+        members.append(HERMES)
+        targets["hermes"] = {"delegate": "hermes_s1"}
+    store = RoomStore(tmp_path / "agent-room.db", owner=OWNER, members=members)
+    operations = RoomOperations(store, dispatch_targets=targets)
     app = FastAPI()
 
     @app.middleware("http")
@@ -150,6 +165,39 @@ def test_federation_route_derives_remote_agent_author_from_canonical_pending_men
     assert conflict.status_code == 409
     messages = store.sync(room_id="ao", after=0, limit=100)["messages"]
     assert [item["body"] for item in messages if item["author_principal"] == "pla"] == ["PLA reply"]
+
+
+def test_remote_agent_reply_preserves_parent_root_and_hop_for_local_child_mention(tmp_path):
+    client, _store = _client(tmp_path, pla_can_mention=True, include_hermes=True)
+    source = _post(
+        client,
+        _envelope("room.post", {"room_id": "ao", "client_message_id": "source", "body": "@PLA hand off"}),
+    ).json()["result"]
+    parent = source["mentions"][0]
+    message = source["message"]
+
+    reply = _post(
+        client,
+        _envelope(
+            "room.post",
+            {
+                "room_id": "ao",
+                "client_message_id": f"mention-reply:{parent['id']}",
+                "body": "Handoff @Hermes",
+                "thread_id": message["thread_id"],
+                "reply_to_message_id": message["id"],
+                "completes_mention_id": parent["id"],
+            },
+        ),
+    )
+
+    assert reply.status_code == 200
+    child = reply.json()["result"]["mentions"][0]
+    assert child["target_principal"] == "hermes"
+    assert child["parent_mention_id"] == parent["id"]
+    assert child["origin_message_id"] == message["id"]
+    assert child["origin_chain"] == ["pla", "hermes"]
+    assert child["hop_count"] == 1
 
 
 def test_federation_route_refuses_unowned_agent_completion_and_missing_trust_tier(tmp_path):
