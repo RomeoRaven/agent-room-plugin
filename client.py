@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 
 CONTRACT_VERSION = "1"
@@ -34,6 +34,11 @@ class PeerRejected(RuntimeError):
     pass
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, "Agent Room federation redirects are disabled", headers, fp)
+
+
 class FederationPeer:
     DEFAULT_MAX_RESPONSE_BYTES = 8 * 1024 * 1024
     ENDPOINT_SUFFIX = "/api/plugins/agent-room/v1/execute"
@@ -43,17 +48,21 @@ class FederationPeer:
         url: str,
         token_file: Path,
         *,
-        open_request=urllib.request.urlopen,
+        open_request=None,
         timeout: float = 30,
         ca_file: Path | None = None,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ) -> None:
         self.url = str(url or "").strip()
         self.token_file = Path(token_file)
-        self.open_request = open_request
         self.timeout = float(timeout)
         self.max_response_bytes = int(max_response_bytes)
         self.ssl_context = ssl.create_default_context(cafile=str(ca_file)) if ca_file else None
+        handlers: list[urllib.request.BaseHandler] = [_RejectRedirects()]
+        if self.ssl_context is not None:
+            handlers.append(urllib.request.HTTPSHandler(context=self.ssl_context))
+        self.open_request: Any = open_request or urllib.request.build_opener(*handlers).open
+        self._external_open_request = open_request is not None
         parsed = urllib.parse.urlsplit(self.url)
         if (
             parsed.scheme != "https"
@@ -88,7 +97,7 @@ class FederationPeer:
             method="POST",
         )
         try:
-            if self.ssl_context is not None:
+            if self.ssl_context is not None and self._external_open_request:
                 response_context = self.open_request(request, timeout=self.timeout, context=self.ssl_context)
             else:
                 response_context = self.open_request(request, timeout=self.timeout)

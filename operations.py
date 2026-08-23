@@ -27,7 +27,7 @@ OPERATIONS = frozenset(
         "room.members",
     }
 )
-_IDENTITY_FIELDS = frozenset({"principal", "author", "author_principal", "source"})
+_IDENTITY_FIELDS = frozenset({"principal", "author", "author_principal", "source", "source_principal"})
 _PUBLIC_MENTION_FIELDS = (
     "id",
     "room_id",

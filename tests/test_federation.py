@@ -98,6 +98,12 @@ def test_federation_route_binds_peer_and_operator_tiers_without_wire_identity(tm
     rejected = _post(client, forged)
     assert rejected.status_code == 400
     assert "unsupported Agent Room envelope field" in rejected.json()["detail"]
+    payload_forgery = _post(
+        client,
+        _envelope("room.members", {"room_id": "ao", "source_principal": "pla"}),
+    )
+    assert payload_forgery.status_code == 400
+    assert "identity fields are host-bound" in payload_forgery.json()["detail"]
 
 
 def test_federation_route_derives_remote_agent_author_from_canonical_pending_mention(tmp_path):

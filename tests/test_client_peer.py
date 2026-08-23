@@ -3,10 +3,11 @@ from __future__ import annotations
 import inspect
 import json
 import urllib.error
+import urllib.request
 
 import pytest
 
-from client import FederationPeer, PeerRejected, PeerUnavailable
+from client import FederationPeer, PeerRejected, PeerUnavailable, _RejectRedirects
 
 
 class Response:
@@ -113,3 +114,30 @@ def test_federation_peer_classifies_auth_rejection_as_nonretryable(tmp_path):
     )
     with pytest.raises(PeerRejected, match="HTTP 401"):
         peer.execute("room.members", {"room_id": "ao"})
+
+
+def test_federation_peer_default_opener_rejects_redirect_before_a_second_request(tmp_path, monkeypatch):
+    peer_file = tmp_path / "peer.value"
+    peer_file.write_text("test-value\n")
+    installed_handlers = []
+
+    class FakeOpener:
+        def open(self, request, timeout):
+            raise AssertionError("no network request is part of constructor proof")
+
+    def build_opener(*handlers):
+        installed_handlers.extend(handlers)
+        return FakeOpener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", build_opener)
+    FederationPeer("https://room-owner.example/api/plugins/agent-room/v1/execute", peer_file)
+
+    handler = next(item for item in installed_handlers if isinstance(item, _RejectRedirects))
+    request = urllib.request.Request(
+        "https://room-owner.example/api/plugins/agent-room/v1/execute",
+        headers={"Authorization": "Bearer test-value"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        handler.redirect_request(request, None, 302, "Found", {}, "http://redirect.example/other")
+    assert exc.value.code == 302
