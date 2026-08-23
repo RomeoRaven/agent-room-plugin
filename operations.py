@@ -255,6 +255,7 @@ class RoomOperations:
             body = _string(payload, "body", max_length=20000)
             completion_id = _optional_string(payload, "completes_mention_id", max_length=200)
             reply_to_message_id = _optional_string(payload, "reply_to_message_id", max_length=200)
+            parent_mention = self.store.mention(completion_id) if completion_id else None
             member = next(
                 member for member in self.store.members(room_id=room_id) if member["principal"] == bound_principal
             )
@@ -266,7 +267,12 @@ class RoomOperations:
                 author_kind=str(member["kind"]),
                 thread_id=_optional_string(payload, "thread_id", max_length=200),
                 reply_to_message_id=reply_to_message_id,
-                mentions=self.resolve_mentions(room_id=room_id, principal=bound_principal, body=body),
+                mentions=self.resolve_mentions(
+                    room_id=room_id,
+                    principal=bound_principal,
+                    body=body,
+                    parent_mention=parent_mention,
+                ),
                 completes_remote_mention_id=completion_id,
             )
             result.setdefault("mentions", [])
