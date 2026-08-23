@@ -6,6 +6,8 @@ from types import ModuleType, SimpleNamespace
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,19 +74,31 @@ def _config(tmp_path, *, peer=True):
     }
 
 
-def test_register_mounts_local_and_federation_routers_without_a2a_ownership(tmp_path):
+def test_register_mounts_one_production_host_router_with_live_federation_endpoint(tmp_path):
     plugin = _load_plugin()
     registry = FakeRegistry(_config(tmp_path))
 
     plugin.register(registry)
 
     assert (tmp_path / "agent-room.db").exists()
-    assert len(registry.routers) == 2
-    assert [prefix for prefix, _router in registry.routers] == [
-        "/api/plugins/agent-room",
-        "/api/plugins/agent-room",
-    ]
-    assert {route.path for route in registry.routers[1][1].routes} == {"/v1/execute"}
+    assert len(registry.routers) == 1
+    prefix, router = registry.routers[0]
+    assert prefix == "/api/plugins/agent-room"
+
+    app = FastAPI()
+
+    @app.middleware("http")
+    async def bind_operator_tier(request: Request, call_next):
+        request.state.trust_tier = "operator"
+        return await call_next(request)
+
+    app.include_router(router, prefix=prefix)
+    response = TestClient(app).post(
+        "/api/plugins/agent-room/v1/execute",
+        json={"contract_version": "1", "operation": "room.members", "payload": {"room_id": "ao"}},
+    )
+    assert response.status_code == 200
+    assert response.json()["result"]["members"]
     assert registry.skills == []
     assert registry.handlers == {}
 
@@ -185,7 +199,7 @@ def test_register_requires_remote_target_to_be_allowlisted_for_the_configured_pe
     config["peer_agent_principals"] = ["pla"]
     registry = FakeRegistry(config)
     plugin.register(registry)
-    assert len(registry.routers) == 2
+    assert len(registry.routers) == 1
 
 
 def test_register_rejects_remote_target_owned_by_another_peer(tmp_path):
