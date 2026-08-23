@@ -89,7 +89,7 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Source-tested | v0.8 host-free owner/client/federation/roster-dispatch suite; exact-host qualification against RR v0.146 baseline is required before release closure |
+| Linux | Exact-host tested | v0.8 host-free suite plus real loader/auth/router qualification against the frozen RR v0.146 baseline; no deployed runtime was changed |
 | Windows | Prior bridge tested | v0.7 native acceptance is retained regression evidence; v0.8 native CI and installed development acceptance remain pending |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 

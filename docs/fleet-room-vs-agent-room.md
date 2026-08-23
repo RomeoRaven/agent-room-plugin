@@ -175,4 +175,4 @@ The Agent Room A2A handler, JSON-RPC wrapper, task polling, and client attestati
 
 The v0.8 candidate includes durable subject rooms, exact local and roster-backed remote mention delivery, bounded agent chains, lifecycle and search, federation client mode, host-enforced read-only delegate invocation, persistent ACP session resume, and restart-safe reply behavior.
 
-Source migration and host-free tests are complete, but installed development deployment and final acceptance have not run. Prior bridge parity and mention results remain regression evidence only. The complete Room acceptance must restart from its first criterion after exact migrated host/plugin deployment.
+Source migration, host-free tests, and isolated exact-host v0.146 loader/auth qualification are complete, but installed development deployment and final acceptance have not run. Prior bridge parity and mention results remain regression evidence only. The complete Room acceptance must restart from its first criterion after exact migrated host/plugin deployment.

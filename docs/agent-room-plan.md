@@ -297,7 +297,7 @@ The project receives `ROOM_ACCEPTED` only after the complete scenario passes on 
 
 ### 1. Qualify and publish the v0.8 source migration
 
-Run repository gates and exact-host v0.146 qualification, complete review/CI, and merge the immutable plugin revision. Do not imply development deployment from source qualification.
+Repository gates and isolated exact-host v0.146 loader/auth qualification pass. Complete exact-head review/CI and merge the immutable plugin revision. Do not imply development deployment from source qualification.
 
 ### 2. Deploy exact migrated revisions to isolated development runtimes
 
