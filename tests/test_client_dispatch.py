@@ -32,14 +32,18 @@ class FakeResolver:
         self.results = list(results or [AGENT, AGENT])
         self.calls = []
 
-    def resolve(self, code):
-        self.calls.append(code)
+    def resolve(self, agent: str) -> dict[str, object]:
+        self.calls.append(agent)
         return self.results.pop(0)
 
 
 class FakePeer:
     def __init__(self):
         self.calls = []
+        self.members = [
+            {"principal": "pla", "mention_token": "@PLA", "mentionable": True},
+            {"principal": "hermes", "mention_token": "@Hermes", "mentionable": True},
+        ]
         self.messages = [
             {
                 "id": "earlier",
@@ -65,6 +69,8 @@ class FakePeer:
         self.calls.append((operation, payload))
         if operation == "room.sync":
             return {"messages": self.messages, "mentions": [], "next_sequence": 21, "has_more": False}
+        if operation == "room.members":
+            return {"members": self.members}
         assert operation == "room.post"
         return {
             "message": {
@@ -107,6 +113,56 @@ def test_delegate_prompt_allows_one_context_bound_room_handoff_without_relaxing_
     assert "Do not invoke tools" in prompt
     assert "Do not mutate files" in prompt
     assert "Do not emit @mention tokens" not in prompt
+
+
+@pytest.mark.parametrize(
+    "source_body,reply,expected",
+    [
+        ("@PLA hand off to @Hermes", "Done @Hermes", "Done @Hermes"),
+        (
+            "@PLA do not hand off",
+            "Invented @Hermes",
+            "Blocked: the authoritative local agent returned an unauthorized Room handoff.",
+        ),
+        (
+            "@PLA hand off to @Hermes",
+            "Repeated @Hermes @Hermes",
+            "Blocked: the authoritative local agent returned an unauthorized Room handoff.",
+        ),
+        (
+            "@PLA status",
+            "Broadcast @all",
+            "Blocked: the authoritative local agent returned an unauthorized Room handoff.",
+        ),
+        (
+            "@PLA hand off to @Observer",
+            "Unknown @Observer",
+            "Blocked: the authoritative local agent returned an unauthorized Room handoff.",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_worker_posts_only_one_known_context_bound_handoff_token(tmp_path, source_body, reply, expected):
+    state = ClientState(tmp_path / "client.db")
+    queue(state)
+    peer = FakePeer()
+    peer.messages[-1]["body"] = source_body
+
+    async def invoke(_delegate, _prompt, _conversation_key, *, permissions):
+        assert permissions == "readonly"
+        return reply
+
+    worker = ClientMentionWorker(
+        state,
+        peer=peer,
+        resolver=FakeResolver(),
+        invoke_delegate=invoke,
+        targets={"pla": {"agent_code": "PLA", "delegate": "pla-room"}},
+    )
+
+    assert await worker.run_once() is True
+    post = next(call for call in peer.calls if call[0] == "room.post")
+    assert post[1]["body"] == expected
 
 
 @pytest.mark.asyncio
