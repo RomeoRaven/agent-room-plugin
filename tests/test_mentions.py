@@ -609,7 +609,16 @@ async def test_restart_marks_interrupted_invocation_ambiguous_without_replay(tmp
     assert calls == 0
 
 
-def test_operator_all_expands_once_to_every_wakeable_agent_in_roster_order(tmp_path):
+def test_operator_all_expands_once_to_every_wakeable_agent_in_roster_order(tmp_path, monkeypatch):
+    ids = iter(
+        [
+            "00000000-0000-0000-0000-000000000009",
+            "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "00000000-0000-0000-0000-000000000001",
+        ]
+    )
+    monkeypatch.setattr("store._now", lambda: "2026-08-24T00:00:00+00:00")
+    monkeypatch.setattr("store.uuid.uuid4", lambda: next(ids))
     pc1 = {
         **OWNER,
         "principal": "pc1",
@@ -632,11 +641,18 @@ def test_operator_all_expands_once_to_every_wakeable_agent_in_roster_order(tmp_p
         {"room_id": "ao", "client_message_id": "all-1", "body": "Wake @all and @Hermes"},
         principal="pc1",
     )["result"]
+    retried = operations.execute(
+        "room.post",
+        {"room_id": "ao", "client_message_id": "all-1", "body": "Wake @all and @Hermes"},
+        principal="pc1",
+    )["result"]
 
-    assert [(mention["target_principal"], mention["token"]) for mention in posted["mentions"]] == [
+    expected = [
         ("headroom", "@all"),
         ("hermes", "@all"),
     ]
+    assert [(mention["target_principal"], mention["token"]) for mention in posted["mentions"]] == expected
+    assert [(mention["target_principal"], mention["token"]) for mention in retried["mentions"]] == expected
 
 
 def test_agent_authored_all_is_rejected_before_room_admission(tmp_path):
