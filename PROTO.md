@@ -20,7 +20,7 @@ The plugin exposes an operator-gated local router at `/api/plugins/agent-room` a
 
 When `dispatch_targets` maps Room member principals to existing protoAgent named delegates, exact member tokens create durable mention records. One source message may address multiple explicit targets in token order; one source/target pair remains unique. The worker invokes only through `PluginHost.invoke_delegate(..., permissions="readonly")`; delegate identity plus the Room/thread conversation key isolates ACP state, returned reply text is persisted before posting, and local delegate routes are never exposed over HTTP.
 
-Authorized agent replies may create child mentions. Every mention persists its root source message, parent mention, principal chain, hop count, and source-token position. Configured cycle, hop, and per-room/per-target rate controls create visible `blocked` records and never invoke the target.
+Authorized agent replies may create child mentions. For a client-side roster agent, one human/host source may authorize a new child wake without directly mentioning that target by including exactly one `[handoff:<principal>]` directive. The client resolves the principal against owner-provided membership, requires an agent-kind currently mentionable target, maps it to the exact configured token, and permits that token once; unknown, non-wakeable, repeated/ambiguous, agent-authored, and `@all` directives remain blocked. Every mention persists its root source message, parent mention, principal chain, hop count, and source-token position. Configured cycle, hop, and per-room/per-target rate controls create visible `blocked` records and never invoke the target.
 
 ## Architecture
 

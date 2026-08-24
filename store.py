@@ -528,7 +528,16 @@ class RoomStore:
                         "SELECT * FROM mentions WHERE id=?", (completed_mention["id"],)
                     ).fetchone()
                 mention_rows = conn.execute(
-                    "SELECT * FROM mentions WHERE source_message_id=? ORDER BY position, created_at, id",
+                    """SELECT mention.* FROM mentions AS mention
+                       JOIN members AS member
+                         ON member.room_id=mention.room_id
+                        AND member.principal=mention.target_principal
+                       WHERE mention.source_message_id=?
+                       ORDER BY mention.position,
+                                CASE WHEN lower(mention.token)='@all' THEN member.role ELSE '' END,
+                                CASE WHEN lower(mention.token)='@all' THEN member.display_name ELSE '' END,
+                                CASE WHEN lower(mention.token)='@all' THEN member.principal ELSE '' END,
+                                mention.created_at, mention.id""",
                     (existing["id"],),
                 ).fetchall()
                 conn.commit()
@@ -647,7 +656,16 @@ class RoomStore:
             conn.execute("UPDATE rooms SET updated_at=? WHERE id=?", (created_at, room_id))
             row = conn.execute("SELECT * FROM messages WHERE id=?", (message_id,)).fetchone()
             mention_rows = conn.execute(
-                "SELECT * FROM mentions WHERE source_message_id=? ORDER BY position, created_at, id",
+                """SELECT mention.* FROM mentions AS mention
+                   JOIN members AS member
+                     ON member.room_id=mention.room_id
+                    AND member.principal=mention.target_principal
+                   WHERE mention.source_message_id=?
+                   ORDER BY mention.position,
+                            CASE WHEN lower(mention.token)='@all' THEN member.role ELSE '' END,
+                            CASE WHEN lower(mention.token)='@all' THEN member.display_name ELSE '' END,
+                            CASE WHEN lower(mention.token)='@all' THEN member.principal ELSE '' END,
+                            mention.created_at, mention.id""",
                 (message_id,),
             ).fetchall()
             conn.commit()
