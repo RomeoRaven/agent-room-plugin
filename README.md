@@ -38,7 +38,7 @@ Fleet runs and operates many agents. Agent Room supplies the durable conversatio
 - Live host-roster admission for configured client-side agent targets
 - Durable hash-keyed local mention claims with no replay after ambiguous ACP interruption
 - Canonical-mention-derived, owner-allowlisted agent attribution for one same-thread reply
-- Context-bound client-agent handoffs that may repeat one exact named Room token while retaining read-only execution, owner-side mention authorization, and agent-origin `@all` rejection
+- Explicit client-agent handoffs using one non-waking `[handoff:<principal>]` operator directive, mapped to the exact owner token while retaining read-only execution, owner-side mention authorization, and agent-origin `@all` rejection
 - Controlled operator-origin `@all` expansion to every configured wakeable agent exactly once in deterministic Room-member order
 - Disabled by default
 
@@ -59,7 +59,7 @@ agent_room:
 
 Each owner-side dispatch principal must also be a configured Room member. A target binds either one local named delegate or one remote peer, never both. A configured client-side target resolves its exact code from a fixed host-owned stdin/JSON resolver before and after one named-delegate ACP turn invoked with the host-enforced `permissions="readonly"` ceiling. Multiple explicit tokens in one message create one ordered durable mention per target; repeated tokens for the same target still create one mention. Delegate identity plus the Room/thread conversation key keeps ACP sessions separate. Plain text wakes nobody. Operator-authenticated human and host members with `can_mention` may use `@all` to wake every configured dispatch-target agent once; agent-authored `@all` remains rejected.
 
-An agent with `can_mention: true` may mention another configured agent from its Room reply. A client-side roster agent may repeat one exact named Room token already present in its bounded thread context when that context explicitly requests a handoff; before posting, the client deterministically replaces unknown, non-mentionable, absent-from-context, repeated, or `@all` tokens with a visible blocked reply. The owner remains authoritative for member capability, dispatch admission, attribution, and mention-chain controls. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
+An agent with `can_mention: true` may mention another configured agent from its Room reply. A human/host source may authorize one new client-side handoff without directly waking the second agent by including exactly one `[handoff:<principal>]` directive, such as `@PLA [handoff:hermes] summarize this`. The client resolves the exact principal against owner-provided Room membership, requires an agent-kind currently mentionable target, tells the roster agent the exact configured token, and permits that token once. Existing exact-token context remains supported. Unknown, non-mentionable, ambiguous/repeated directives, repeated tokens, and `@all` are replaced with a visible blocked reply. The owner remains authoritative for member capability, dispatch admission, attribution, and mention-chain controls. The child mention persists its parent, root message, principal chain, and hop count. Cycles, hop-limit excess, and per-room/per-target rate excess are stored as visible `blocked` mention states and never invoke a delegate. A possible process interruption during delegate invocation becomes visible `ambiguous` state and is not automatically replayed.
 
 New rooms inherit the installation's configured owner/member roster. Archive is read-only but reversible. Start fresh advances the default visible-history boundary without deleting messages; earlier history remains paged, searchable, and restart-safe. Archive and Start fresh refuse rooms with pending agent delivery. Permanent message/room deletion is deliberately absent.
 
@@ -91,8 +91,8 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Tested | v0.8.2: 101-test host-free suite plus installed protoAgent v0.146 owner-mode qualification, including preserved cross-host agent-mention lineage and controlled operator-origin `@all` |
-| Windows | Tested | v0.8.2: native Python 3.12.3 suite plus installed protoAgent v0.146 client-mode qualification and exact same-thread handoff |
+| Linux | Tested | v0.8.3: host-free suite plus installed protoAgent v0.146 owner/client qualification, including explicit non-waking handoff authorization and controlled operator-origin `@all` |
+| Windows | Tested | v0.8.3: native Python 3.12.3 suite plus installed protoAgent v0.146 client-mode qualification and exact same-thread handoff |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.

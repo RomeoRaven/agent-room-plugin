@@ -41,8 +41,8 @@ class FakePeer:
     def __init__(self):
         self.calls = []
         self.members = [
-            {"principal": "pla", "mention_token": "@PLA", "mentionable": True},
-            {"principal": "hermes", "mention_token": "@Hermes", "mentionable": True},
+            {"principal": "pla", "kind": "agent", "mention_token": "@PLA", "mentionable": True},
+            {"principal": "hermes", "kind": "agent", "mention_token": "@Hermes", "mentionable": True},
         ]
         self.messages = [
             {
@@ -123,6 +123,61 @@ def test_reply_validation_allows_exact_dotted_owner_token():
     assert ClientMentionWorker._validated_reply_body(body, context, members) == body
 
 
+def test_reply_validation_allows_operator_directive_without_literal_token():
+    body = "Done @Hermes"
+    context = [
+        {
+            "id": "source",
+            "author_kind": "host",
+            "body": "@PLA [handoff:hermes] complete the bounded handoff",
+        }
+    ]
+    members = [
+        {
+            "principal": "hermes",
+            "kind": "agent",
+            "mention_token": "@Hermes",
+            "mentionable": True,
+        }
+    ]
+
+    assert ClientMentionWorker._validated_reply_body(body, context, members, source_message_id="source") == body
+
+
+@pytest.mark.parametrize(
+    "author_kind,source_body,members",
+    [
+        (
+            "agent",
+            "@PLA [handoff:hermes] complete the bounded handoff",
+            [{"principal": "hermes", "kind": "agent", "mention_token": "@Hermes", "mentionable": True}],
+        ),
+        (
+            "host",
+            "@PLA [handoff:hermes] [handoff:headroom] complete the bounded handoff",
+            [{"principal": "hermes", "kind": "agent", "mention_token": "@Hermes", "mentionable": True}],
+        ),
+        (
+            "host",
+            "@PLA [handoff:unknown] complete the bounded handoff",
+            [{"principal": "hermes", "kind": "agent", "mention_token": "@Hermes", "mentionable": True}],
+        ),
+        (
+            "host",
+            "@PLA [handoff:hermes] complete the bounded handoff",
+            [{"principal": "hermes", "kind": "agent", "mention_token": "@Hermes", "mentionable": False}],
+        ),
+    ],
+)
+def test_reply_validation_blocks_unauthorized_handoff_directives(author_kind, source_body, members):
+    context = [{"id": "source", "author_kind": author_kind, "body": source_body}]
+
+    assert (
+        ClientMentionWorker._validated_reply_body("Done @Hermes", context, members, source_message_id="source")
+        == "Blocked: the authoritative local agent returned an unauthorized Room handoff."
+    )
+
+
 def test_reply_validation_blocks_exact_owner_token_absent_from_context():
     body = "Unexpected @"
     context = [{"body": "@PLA do not hand off"}]
@@ -181,6 +236,31 @@ async def test_worker_posts_only_one_known_context_bound_handoff_token(tmp_path,
     assert await worker.run_once() is True
     post = next(call for call in peer.calls if call[0] == "room.post")
     assert post[1]["body"] == expected
+
+
+@pytest.mark.asyncio
+async def test_worker_maps_operator_handoff_directive_to_exact_owner_token(tmp_path):
+    state = ClientState(tmp_path / "client.db")
+    queue(state)
+    peer = FakePeer()
+    peer.messages[-1]["body"] = "@PLA [handoff:hermes] complete the bounded handoff"
+
+    async def invoke(_delegate, prompt, _conversation_key, *, permissions):
+        assert permissions == "readonly"
+        assert "[handoff:hermes] authorizes exactly @Hermes" in prompt
+        return "Done @Hermes"
+
+    worker = ClientMentionWorker(
+        state,
+        peer=peer,
+        resolver=FakeResolver(),
+        invoke_delegate=invoke,
+        targets={"pla": {"agent_code": "PLA", "delegate": "pla-room"}},
+    )
+
+    assert await worker.run_once() is True
+    post = next(call for call in peer.calls if call[0] == "room.post")
+    assert post[1]["body"] == "Done @Hermes"
 
 
 @pytest.mark.asyncio
