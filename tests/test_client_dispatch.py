@@ -178,6 +178,35 @@ def test_reply_validation_blocks_unauthorized_handoff_directives(author_kind, so
     )
 
 
+def test_reply_validation_blocks_ambiguous_owner_principal():
+    context = [
+        {
+            "id": "source",
+            "author_kind": "host",
+            "body": "@PLA [handoff:hermes] complete the bounded handoff",
+        }
+    ]
+    members = [
+        {
+            "principal": "Hermes",
+            "kind": "agent",
+            "mention_token": "@HermesOne",
+            "mentionable": True,
+        },
+        {
+            "principal": "hermes",
+            "kind": "agent",
+            "mention_token": "@HermesTwo",
+            "mentionable": True,
+        },
+    ]
+
+    assert (
+        ClientMentionWorker._validated_reply_body("Done @HermesTwo", context, members, source_message_id="source")
+        == "Blocked: the authoritative local agent returned an unauthorized Room handoff."
+    )
+
+
 def test_reply_validation_blocks_exact_owner_token_absent_from_context():
     body = "Unexpected @"
     context = [{"body": "@PLA do not hand off"}]

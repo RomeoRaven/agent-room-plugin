@@ -113,14 +113,17 @@ class ClientMentionWorker:
         if len(directives) != 1:
             return set()
         principal = directives[0].casefold()
-        return {
-            str(member.get("mention_token") or "").casefold()
+        matches = [
+            member
             for member in members
             if str(member.get("principal") or "").casefold() == principal
             and member.get("kind") == "agent"
             and bool(member.get("mentionable"))
             and str(member.get("mention_token") or "")
-        }
+        ]
+        if len(matches) != 1:
+            return set()
+        return {str(matches[0]["mention_token"]).casefold()}
 
     @staticmethod
     def _validated_reply_body(
