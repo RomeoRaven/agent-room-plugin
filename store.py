@@ -27,6 +27,11 @@ DEFAULT_OWNER = {
     "can_post": True,
     "can_mention": True,
 }
+PROFILE_FIELDS = ("summary", "capabilities", "best_for", "boundaries", "fallback")
+PROFILE_LIST_FIELDS = ("capabilities", "best_for", "boundaries")
+PROFILE_TEXT_MAX = 1000
+PROFILE_LIST_MAX = 20
+PROFILE_ITEM_MAX = 200
 
 
 class RoomConflict(ValueError):
@@ -37,12 +42,45 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_member(member: dict) -> dict:
+    normalized = dict(member)
+    if "profile" not in normalized:
+        return normalized
+    profile = normalized["profile"]
+    if not isinstance(profile, dict) or set(profile) != set(PROFILE_FIELDS):
+        raise ValueError("member profile must contain exactly the public profile fields")
+    for field in ("summary", "fallback"):
+        value = profile[field]
+        if not isinstance(value, str) or len(value.strip()) > PROFILE_TEXT_MAX:
+            raise ValueError(f"member profile {field} must be a string of at most {PROFILE_TEXT_MAX} characters")
+    public = {"summary": profile["summary"].strip()}
+    for field in PROFILE_LIST_FIELDS:
+        values = profile[field]
+        if not isinstance(values, list) or len(values) > PROFILE_LIST_MAX:
+            raise ValueError(f"member profile {field} must be a list of at most {PROFILE_LIST_MAX} strings")
+        if any(not isinstance(value, str) or len(value.strip()) > PROFILE_ITEM_MAX for value in values):
+            raise ValueError(f"member profile {field} items must be strings of at most {PROFILE_ITEM_MAX} characters")
+        public[field] = [value.strip() for value in values]
+    public["fallback"] = profile["fallback"].strip()
+    normalized["profile"] = public
+    return normalized
+
+
+def _public_profile(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
+    try:
+        return _normalize_member({"profile": json.loads(raw)})["profile"]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+
+
 class RoomStore:
     def __init__(self, path: str | Path, *, owner: dict | None = None, members: list[dict] | None = None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._owner = dict(owner or DEFAULT_OWNER)
-        self._configured_members = [self._owner, *[dict(member) for member in (members or [])]]
+        self._owner = _normalize_member(owner or DEFAULT_OWNER)
+        self._configured_members = [self._owner, *[_normalize_member(member) for member in (members or [])]]
         self._initialize(self._owner, self._configured_members[1:])
 
     def _connect(self) -> sqlite3.Connection:
@@ -76,8 +114,8 @@ class RoomStore:
             conn.execute(
                 """INSERT INTO members(
                        room_id, principal, kind, display_name, role,
-                       mention_token, host, can_post, can_mention
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       mention_token, host, can_post, can_mention, profile
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(room_id, principal) DO UPDATE SET
                      kind=excluded.kind,
                      display_name=excluded.display_name,
@@ -85,7 +123,8 @@ class RoomStore:
                      mention_token=excluded.mention_token,
                      host=excluded.host,
                      can_post=excluded.can_post,
-                     can_mention=excluded.can_mention""",
+                     can_mention=excluded.can_mention,
+                     profile=excluded.profile""",
                 (
                     room_id,
                     str(member["principal"]).strip(),
@@ -96,6 +135,7 @@ class RoomStore:
                     str(member.get("host") or "operator"),
                     int(bool(member.get("can_post", member is self._owner))),
                     int(bool(member.get("can_mention", member is self._owner))),
+                    json.dumps(member["profile"]) if "profile" in member else None,
                 ),
             )
 
@@ -137,6 +177,7 @@ class RoomStore:
                     host TEXT NOT NULL,
                     can_post INTEGER NOT NULL,
                     can_mention INTEGER NOT NULL,
+                    profile TEXT,
                     PRIMARY KEY(room_id, principal),
                     UNIQUE(room_id, mention_token)
                 );
@@ -196,6 +237,9 @@ class RoomStore:
                 if column not in room_columns:
                     conn.execute(statement)
             conn.execute("UPDATE rooms SET updated_at=created_at WHERE updated_at='' OR updated_at IS NULL")
+            member_columns = {row["name"] for row in conn.execute("PRAGMA table_info(members)").fetchall()}
+            if "profile" not in member_columns:
+                conn.execute("ALTER TABLE members ADD COLUMN profile TEXT")
             mention_columns = {row["name"] for row in conn.execute("PRAGMA table_info(mentions)").fetchall()}
             migrations = {
                 "parent_mention_id": "ALTER TABLE mentions ADD COLUMN parent_mention_id TEXT REFERENCES mentions(id)",
@@ -960,18 +1004,22 @@ class RoomStore:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT principal, kind, display_name, role, mention_token,
-                          host, can_post, can_mention
+                          host, can_post, can_mention, profile
                    FROM members WHERE room_id=? ORDER BY role, display_name, principal""",
                 (room_id,),
             ).fetchall()
-        return [
-            {
+        members = []
+        for row in rows:
+            member = {
                 **{key: row[key] for key in ("principal", "kind", "display_name", "role", "mention_token", "host")},
                 "can_post": bool(row["can_post"]),
                 "can_mention": bool(row["can_mention"]),
             }
-            for row in rows
-        ]
+            profile = _public_profile(row["profile"])
+            if profile is not None:
+                member["profile"] = profile
+            members.append(member)
+        return members
 
     def is_member(self, *, room_id: str, principal: str) -> bool:
         with self._connect() as conn:

@@ -20,6 +20,7 @@ Fleet runs and operates many agents. Agent Room supplies the durable conversatio
 - SQLite-backed ordered messages
 - Stable client-message retry deduplication and conflict detection
 - Config-bound membership and author identity
+- Optional bounded owner/member profiles exposed through `room.members`
 - Persistent member cursors
 - Gated model-free Room list/lifecycle/search/post/sync/ack/members API
 - Room-visible `mentionable` state so the native composer suggests only configured local dispatch targets
@@ -46,6 +47,21 @@ Dispatch is generic and opt-in. Installation-specific names stay in local config
 
 ```yaml
 agent_room:
+  members:
+    - principal: assistant
+      kind: agent
+      display_name: Assistant
+      role: member
+      mention_token: "@Assistant"
+      host: local
+      can_post: true
+      can_mention: false
+      profile:
+        summary: "General-purpose implementation assistant."
+        capabilities: ["Python", "SQLite"]
+        best_for: ["Backend changes", "Test-driven fixes"]
+        boundaries: ["No production deployment authority"]
+        fallback: "Ask the operator for an owner decision."
   dispatch_targets:
     assistant:
       delegate: assistant_local
@@ -56,6 +72,12 @@ agent_room:
     max_mentions_per_target: 5
     rate_window_seconds: 60
 ```
+
+`profile` is optional on both the owner and each member. When present, it must contain exactly `summary`,
+`capabilities`, `best_for`, `boundaries`, and `fallback`. Summary and fallback strings are each bounded to
+1,000 characters. Each list is bounded to 20 items, and each string item is bounded to 200 characters. Agent Room trims
+surrounding whitespace, rejects malformed or additional profile fields, persists the normalized profile in SQLite,
+and returns only the five public profile fields through local, federation, and client `room.members` responses.
 
 Each owner-side dispatch principal must also be a configured Room member. A target binds either one local named delegate or one remote peer, never both. A configured client-side target resolves its exact code from a fixed host-owned stdin/JSON resolver before and after one named-delegate ACP turn invoked with the host-enforced `permissions="readonly"` ceiling. Multiple explicit tokens in one message create one ordered durable mention per target; repeated tokens for the same target still create one mention. Delegate identity plus the Room/thread conversation key keeps ACP sessions separate. Plain text wakes nobody. Operator-authenticated human and host members with `can_mention` may use `@all` to wake every configured dispatch-target agent once; agent-authored `@all` remains rejected.
 
@@ -91,8 +113,8 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Tested | v0.8.3: host-free suite plus installed protoAgent v0.146 owner/client qualification, including explicit non-waking handoff authorization and controlled operator-origin `@all` |
-| Windows | Tested | v0.8.3: native Python 3.12.3 suite plus installed protoAgent v0.146 client-mode qualification and exact same-thread handoff |
+| Linux | Tested | v0.9.0: host-free suite including bounded persistent member profiles; installed protoAgent v0.146 owner/client qualification remains from v0.8.3 |
+| Windows | Tested | v0.8.3: native Python 3.12.3 suite plus installed protoAgent v0.146 client-mode qualification and exact same-thread handoff; v0.9.0 not yet rerun |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
 See `PROTO.md` for architecture, constraints, and the current acceptance boundary.

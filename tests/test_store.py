@@ -97,6 +97,71 @@ def test_fixed_member_and_monotonic_ack_persist_across_restart(tmp_path):
         reopened.ack(room_id="ao", principal="dennis", sequence=3)
 
 
+def test_member_profile_persists_and_is_returned_with_exact_public_fields(tmp_path):
+    path = tmp_path / "agent-room.db"
+    profile = {
+        "summary": "Coordinates implementation work.",
+        "capabilities": ["Python", "SQLite"],
+        "best_for": ["Backend changes"],
+        "boundaries": ["No production deploys"],
+        "fallback": "Ask the operator for an owner decision.",
+    }
+    member = {
+        "principal": "hermes",
+        "kind": "agent",
+        "display_name": "Hermes",
+        "role": "member",
+        "mention_token": "@Hermes",
+        "host": "s1",
+        "can_post": True,
+        "can_mention": True,
+        "profile": profile,
+    }
+
+    _store(path, members=[member])
+    reopened = _store(path, members=[member])
+
+    public = next(item for item in reopened.members(room_id="ao") if item["principal"] == "hermes")
+    assert public["profile"] == profile
+    assert set(public["profile"]) == {"summary", "capabilities", "best_for", "boundaries", "fallback"}
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        "not-an-object",
+        {"summary": "Missing the remaining fields"},
+        {
+            "summary": "Valid",
+            "capabilities": [],
+            "best_for": [],
+            "boundaries": [],
+            "fallback": "Valid",
+            "private_note": "not public contract data",
+        },
+        {"summary": "x" * 1001, "capabilities": [], "best_for": [], "boundaries": [], "fallback": "Valid"},
+        {"summary": "Valid", "capabilities": ["x"] * 21, "best_for": [], "boundaries": [], "fallback": "Valid"},
+        {"summary": "Valid", "capabilities": ["x" * 201], "best_for": [], "boundaries": [], "fallback": "Valid"},
+        {"summary": "Valid", "capabilities": [3], "best_for": [], "boundaries": [], "fallback": "Valid"},
+    ],
+)
+def test_member_profile_rejects_values_outside_the_exact_bounded_schema(tmp_path, profile):
+    member = {
+        "principal": "hermes",
+        "kind": "agent",
+        "display_name": "Hermes",
+        "role": "member",
+        "mention_token": "@Hermes",
+        "host": "s1",
+        "can_post": True,
+        "can_mention": True,
+        "profile": profile,
+    }
+
+    with pytest.raises(ValueError, match="member profile"):
+        _store(tmp_path / "agent-room.db", members=[member])
+
+
 def test_only_configured_posting_members_can_author_messages(tmp_path):
     store = _store(
         tmp_path / "agent-room.db",
