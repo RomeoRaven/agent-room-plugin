@@ -1,6 +1,6 @@
 id: agent-room
-name: Agent Room Backend
-version: 0.9.0
+name: Agent Room
+version: 1.0.0
 description: >-
   Durable model-free shared-room owner and deterministic peer client for protoAgent: subject rooms,
   lifecycle, bounded history, indexed search, ordered messages, stable
@@ -9,6 +9,12 @@ description: >-
 enabled: false
 repository: https://github.com/RomeoRaven/agent-room-plugin
 min_protoagent_version: "0.146.0"
+views:
+  - id: rooms
+    label: Rooms
+    icon: MessagesSquare
+    placement: rail
+    path: /plugins/agent-room/view
 
 config_section: agent_room
 config:
@@ -44,6 +50,7 @@ capabilities:
 
 emits: []
 subscribes: []
-public_paths: []
+public_paths:
+  - /plugins/agent-room/
 federation_paths:
   - /api/plugins/agent-room/v1/

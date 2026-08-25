@@ -1,14 +1,14 @@
-# Agent Room Backend
+# Agent Room
 
-Durable shared-room backend for [protoAgent](https://github.com/protoLabsAI/protoAgent).
+Self-contained shared-room plugin for [protoAgent](https://github.com/protoLabsAI/protoAgent).
 
-This plugin is intentionally backend-only. It reuses protoAgent's native Room/Fleet Room surface rather than shipping a second chat UI.
+The plugin ships the complete product surface: canonical storage and policy, deterministic owner/client operations, and its first-class console view. Installing or updating Agent Room does not require an Agent Room-specific protoAgent build; core supplies only the generic plugin-view host.
 
 ## Why this exists
 
-Fleet runs and operates many agents. Agent Room supplies the durable conversation layer that Fleet Room lacked: one canonical transcript, exact mentions, attributed replies, search, and recovery. The permanent direction is one Fleet Room chat product backed by separate Fleet process authority and Agent Room transcript authority.
+Fleet Room operates agent processes. Agent Room is the separate durable collaboration product: one canonical transcript, exact mentions, attributed replies, search, recovery, room lifecycle, and member profiles.
 
-- [Fleet Room and the Agent Room backend](docs/fleet-room-vs-agent-room.md) explains the unified product surface and separate internal responsibilities.
+- [Fleet Room and Agent Room](docs/fleet-room-vs-agent-room.md) explains the distinct product and authority boundaries.
 - [Agent Room plan](docs/agent-room-plan.md) shows the architecture, completed work, federation-route migration, remaining acceptance, and definition of done.
 
 ## Current slice
@@ -21,9 +21,10 @@ Fleet runs and operates many agents. Agent Room supplies the durable conversatio
 - Stable client-message retry deduplication and conflict detection
 - Config-bound membership and author identity
 - Optional bounded owner/member profiles exposed through `room.members`
+- First-class plugin-owned Rooms rail view with transcript, roster, separate profiles, exact mention insertion, lifecycle, and search
 - Persistent member cursors
 - Gated model-free Room list/lifecycle/search/post/sync/ack/members API
-- Room-visible `mentionable` state so the native composer suggests only configured local dispatch targets
+- Room-visible `mentionable` state so the plugin composer suggests only configured local dispatch targets
 - Federation-authenticated `/api/plugins/agent-room/v1/execute` endpoint for deterministic peer operations
 - Exact configured member-token resolution with durable mention state
 - Same-message delivery to multiple explicitly mentioned targets in token order
@@ -89,12 +90,12 @@ Not included yet: client-side lifecycle/search, attachments, reactions, per-room
 
 ## Local-first product boundary
 
-A single protoAgent instance is the complete default product. Installations can keep `peer_principal` empty and use the durable Room, native UI, local members, and local named-delegate mentions without any second device, tunnel, TLS setup, remote credential, or offline queue.
+A single protoAgent instance is the complete default product. Installations can keep `peer_principal` empty and use the durable Room, plugin-owned UI, local members, and local named-delegate mentions without any second device, tunnel, TLS setup, remote credential, or offline queue.
 
 The ownership split is deliberate:
 
-- This plugin owns canonical Room storage, lifecycle, indexed search, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and the stable model-free Room operations.
-- protoAgent's native console owns human interaction: room switching and lifecycle controls, search presentation, navigation, member selection, mention autocomplete, recipient guidance, transcript rendering, and accessible keyboard behavior.
+- This plugin owns the complete Agent Room product: its console view, canonical storage, lifecycle, indexed search, membership, ordering, cursors, exact mention resolution, local delegate dispatch, and stable model-free Room operations.
+- protoAgent core owns only generic plugin installation, authenticated plugin routes, sandboxed plugin-view hosting, navigation discovery, theme/kit integration, and delegate/federation seams.
 - Optional `mode: client` calls the same deterministic Room operations for another device. It owns its directional peer URL/credential/CA reference plus `agent-room-client.db`, which stores pending posts, acknowledgement/delivery cursors, and local mention-dispatch claims only. It never stores canonical messages or assigns sequence numbers.
 - A host-local roster adapter maps that host's authoritative agents to Room principals. The Room plugin does not mirror or replace another host's agent identities.
 
@@ -113,7 +114,7 @@ pytest -q
 
 | Platform | Status | Evidence / follow-up |
 |---|---|---|
-| Linux | Tested | v0.9.0: host-free suite including bounded persistent member profiles; installed protoAgent v0.146 owner/client qualification remains from v0.8.3 |
+| Linux | Tested | v1.0.0: 128 host-free Python tests, 8 browser-logic tests, and isolated installed protoAgent console acceptance for the self-contained plugin view |
 | Windows | Tested | v0.8.3: native Python 3.12.3 suite plus installed protoAgent v0.146 client-mode qualification and exact same-thread handoff; v0.9.0 not yet rerun |
 | macOS | Not tested | Intended; native validation has not been run for this release |
 
