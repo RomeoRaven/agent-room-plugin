@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rooms</title>
+  <script>
+    window.__base = location.pathname.split("/plugins/")[0];
+    document.write('<link rel="stylesheet" href="' + window.__base + '/_ds/plugin-kit.css">');
+    document.write('<link rel="stylesheet" href="' + window.__base + '/plugins/agent-room/assets/room.css">');
+  </script>
+</head>
+<body>
+  <div id="room-app" aria-busy="true">
+    <p id="loading" class="state" aria-live="polite">Loading rooms…</p>
+    <p id="fatal-error" class="state error" role="alert" hidden></p>
+  </div>
+  <script type="module">
+    const kit = await import(window.__base + "/_ds/plugin-kit.js");
+    const room = await import(window.__base + "/plugins/agent-room/assets/room.js");
+    kit.initPluginView(() => room.start(kit));
+  </script>
+</body>
+</html>

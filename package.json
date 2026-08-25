@@ -1,0 +1,7 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:static": "node --test tests/room.test.mjs"
+  }
+}

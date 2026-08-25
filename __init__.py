@@ -17,6 +17,7 @@ try:  # package load under protoAgent
     from .operations import RoomOperations
     from .resolver import RosterResolver
     from .store import RoomStore
+    from .view import build_view_router
 except ImportError:  # host-free pytest imports root __init__ directly
     from api import build_router
     from client import ClientRoomService, ClientState, FederationPeer, PeerReconciler
@@ -27,6 +28,7 @@ except ImportError:  # host-free pytest imports root __init__ directly
     from operations import RoomOperations
     from resolver import RosterResolver
     from store import RoomStore
+    from view import build_view_router
 
 
 def _data_dir(config: dict) -> Path:
@@ -44,6 +46,7 @@ def _data_dir(config: dict) -> Path:
 
 def register(registry) -> None:
     config = dict(getattr(registry, "config", None) or {})
+    registry.register_router(build_view_router(), prefix="/plugins/agent-room")
     mode = str(config.get("mode") or "owner").strip().casefold()
     if mode not in {"owner", "client"}:
         raise ValueError("agent_room mode must be owner or client")

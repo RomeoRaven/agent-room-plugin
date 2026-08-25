@@ -66,12 +66,11 @@ The system distinguishes between work that is safe to retry and work that may al
 
 ## Architecture
 
-Agent Room is split across clear internal owners behind one Fleet Room chat product.
+Agent Room is one self-contained plugin product hosted through generic protoAgent extension seams.
 
 | Layer | Responsibility |
 |---|---|
-| Native protoAgent Fleet Room | Unified roster and chat surface, transcript, composer, mention picker, lifecycle controls, search, offline and pending state |
-| Optional Rooms rail exposure | A second navigation path to the same backend; retained during development and judged separately from the product and transport architecture |
+| Agent Room plugin view | First-class Rooms rail surface, transcript, composer, roster, profiles, exact mention insertion, lifecycle controls, search, offline and pending state |
 | Agent Room plugin, owner mode | Canonical Room database, lifecycle, search, membership, message ordering, mention resolution, delivery state, attributed replies |
 | Agent Room plugin, client mode | Deterministic owner calls, pending-post outbox, acknowledgement and delivery cursors, local mention claims |
 | Released core `federation_paths` seam | Lets the plugin expose only `/api/plugins/agent-room/v1/` to federation trust while keeping operator APIs unavailable |
@@ -82,11 +81,11 @@ Agent Room is split across clear internal owners behind one Fleet Room chat prod
 
 ## Repository boundary
 
-This repository owns the generic durable backend.
+This repository owns the complete Agent Room product.
 
-It does not ship another React chat application. The normal UI belongs to protoAgent's native console. Installation-specific agent names, routes, credentials, local paths, and deployment policy remain outside the repository.
+It ships its own console view and browser assets through protoAgent's generic plugin-view seam. Installation-specific agent names, routes, credentials, local paths, and deployment policy remain outside the repository.
 
-Generic console work lives in the protoAgent repository. Generic Room behavior lives here.
+protoAgent core owns generic plugin discovery, routing, sandboxed rail hosting, theme/kit integration, federation admission, and named-delegate seams. Agent Room-specific UI, policy, API types, and navigation live here.
 
 ## Upstream federation direction
 
@@ -123,7 +122,7 @@ Complete and merged.
 - Monotonic member cursors.
 - Gated local API.
 - Deterministic local and federation HTTP operations.
-- Backend-only plugin boundary.
+- Self-contained plugin product boundary.
 
 ### Local exact-mention replies
 
@@ -163,12 +162,12 @@ Complete and merged.
 - Unread and mention badges.
 - Migration of existing fixed-room data without changing canonical IDs.
 
-### Native Rooms UI
+### Self-contained Rooms UI
 
-Complete and merged in the protoAgent fork.
+Complete in the Agent Room plugin candidate.
 
 - Visible Rooms rail entry.
-- Full-height native layout.
+- Full-height sandboxed plugin layout.
 - Room switcher and lifecycle controls.
 - Search and result navigation.
 - Pagination and cache isolation.
@@ -237,7 +236,7 @@ Live qualification has proven:
 - interrupted-invocation restart producing a visible blocked reply without replay;
 - Room replies completing without tool use;
 - delegate process-tree cleanup;
-- native Room UI visibility, attribution, mention availability, and zero browser errors;
+- plugin Room UI visibility, attribution, mention availability, and zero browser errors;
 - owner, client, transport, and unrelated stable-runtime health after restart.
 
 The first live model turn exposed a service-context shell-read problem. The agent eventually produced the requested answer, but its read tools stalled past the Room reply deadline. The accepted correction preloads the exact bounded owner files through the roster adapter and forbids Room reply tool use. The corrected path returned the requested reply through the same persistent ACP session in a few seconds.

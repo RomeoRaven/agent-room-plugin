@@ -1,6 +1,6 @@
 # PROTO.md — agent grounding for agent-room-plugin
 
-Read this before changing anything. This repository is the durable backend owner for protoAgent's shared Agent Room. It deliberately ships no React view: the product reuses and evolves protoAgent's existing native Fleet Room UI.
+Read this before changing anything. This repository owns the complete self-contained Agent Room product for protoAgent: durable backend, browser console view, policy, tests, and release compatibility. protoAgent core owns only generic plugin-host seams.
 
 ## Current accepted scope
 
@@ -35,12 +35,13 @@ Authorized agent replies may create child mentions. For a client-side roster age
 | `client.py` | Optional bounded HTTPS federation client, pending-post/cursor/local-dispatch SQLite state, and reconciliation surface. |
 | `client_dispatch.py` | Live roster-bound client mention claim, bounded context, ACP wake, source recheck, and exact attributed reply. |
 | `resolver.py` | Fixed-argv bounded stdin/JSON bridge to the host-owned roster resolver. |
-| `client_api.py` | Fixed-room local API adapter for the native PC1 Room UI; no lifecycle/search or canonical storage. |
-| `tests/` | Host-free store, operation, local/federation API, client, registration, and manifest proof. |
+| `client_api.py` | Fixed-room local API adapter for the plugin UI; no lifecycle/search or canonical storage. |
+| `view.py`, `web/` | First-class plugin view and assets for transcript, roster, profiles, mentions, lifecycle, and search. |
+| `tests/` | Host-free store, operation, local/federation API, client, registration, manifest, and UI contract proof. |
 
 ## Rules
 
-- Keep the repository backend-only; do not add a second Room UI.
+- Keep Agent Room product behavior self-contained here; do not add Agent Room-specific UI, policy, API types, or navigation to protoAgent core.
 - Keep `enabled: false` by default.
 - Never trust `principal`, `author`, `source`, or similar identity fields from request payloads or envelopes. Operator/federation identity comes from `request.state.trust_tier`; a remote agent author is derived only from an existing canonical remote mention and the configured peer-agent allowlist.
 - Only the canonical Room owner assigns per-room message sequence numbers and may change room lifecycle.
@@ -58,14 +59,15 @@ Authorized agent replies may create child mentions. For a client-side roster age
 
 ## Local-first and optional peer ownership
 
-The standalone, single-instance Room is the primary complete product path. `peer_principal` defaults empty; local Room storage, native UI, and local delegate mentions must remain fully usable without federation route admission or any cross-device configuration.
+The standalone, single-instance Room is the primary complete product path. `peer_principal` defaults empty; local Room storage, plugin UI, and local delegate mentions must remain fully usable without federation route admission or any cross-device configuration.
 
 Keep multi-device concerns outside the local core:
 
 | Concern | Owner |
 |---|---|
 | Canonical rooms/lifecycle/search, messages, membership, cursors, mention records, local dispatch | Agent Room plugin |
-| Room switching/lifecycle/search UI, member click, mention picker, recipient guidance, accessible composer | Native protoAgent console |
+| Room switching/lifecycle/search UI, member click, profiles, mention insertion, recipient guidance, accessible composer | Agent Room plugin view |
+| Plugin installation, authenticated routing, sandboxed rail hosting, theme/kit integration | Generic protoAgent core seams |
 | Private route, TLS, directional credentials, advertised URLs | Host deployment owner |
 | Pending-post outbox, cursor state, deterministic reconciliation, local dispatch claim | Plugin client mode |
 | Authoritative agent identity and principal-to-runtime binding | Host-local roster adapter |

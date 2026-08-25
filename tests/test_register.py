@@ -81,8 +81,9 @@ def test_register_mounts_one_production_host_router_with_live_federation_endpoin
     plugin.register(registry)
 
     assert (tmp_path / "agent-room.db").exists()
-    assert len(registry.routers) == 1
-    prefix, router = registry.routers[0]
+    assert len(registry.routers) == 2
+    assert registry.routers[0][0] == "/plugins/agent-room"
+    prefix, router = registry.routers[1]
     assert prefix == "/api/plugins/agent-room"
 
     app = FastAPI()
@@ -109,7 +110,10 @@ def test_register_without_peer_keeps_local_api_but_advertises_no_a2a_skill(tmp_p
 
     plugin.register(registry)
 
-    assert len(registry.routers) == 1
+    assert [prefix for prefix, _ in registry.routers] == [
+        "/plugins/agent-room",
+        "/api/plugins/agent-room",
+    ]
     assert registry.skills == []
     assert registry.handlers == {}
     assert registry.surfaces == []
@@ -132,7 +136,10 @@ def test_register_client_mode_mounts_proxy_and_reconcile_without_owner_database(
 
     assert not (tmp_path / "agent-room.db").exists()
     assert (tmp_path / "agent-room-client.db").exists()
-    assert len(registry.routers) == 1 and registry.routers[0][0] == "/api/plugins/agent-room"
+    assert [prefix for prefix, _ in registry.routers] == [
+        "/plugins/agent-room",
+        "/api/plugins/agent-room",
+    ]
     assert [surface["name"] for surface in registry.surfaces] == ["peer-reconciliation"]
     assert registry.skills == []
     assert registry.handlers == {}
@@ -199,7 +206,7 @@ def test_register_requires_remote_target_to_be_allowlisted_for_the_configured_pe
     config["peer_agent_principals"] = ["pla"]
     registry = FakeRegistry(config)
     plugin.register(registry)
-    assert len(registry.routers) == 1
+    assert len(registry.routers) == 2
 
 
 def test_register_rejects_remote_target_owned_by_another_peer(tmp_path):
