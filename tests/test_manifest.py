@@ -17,7 +17,7 @@ def test_manifest_is_backend_and_peer_client_disabled_and_version_synced():
     version = match.group(1)
 
     assert manifest["id"] == "agent-room"
-    assert manifest["version"] == version == "0.8.3"
+    assert manifest["version"] == version == "0.9.0"
     assert manifest["enabled"] is False
     assert manifest["repository"] == "https://github.com/RomeoRaven/agent-room-plugin"
     assert manifest["min_protoagent_version"] == "0.146.0"
@@ -47,3 +47,14 @@ def test_active_plugin_source_has_no_agent_room_a2a_transport():
     source = "\n".join(path.read_text() for path in ROOT.glob("*.py") if path.name not in {"test_a2a.py"})
     for retired in ("A2APeer", "register_a2a_handler", "register_a2a_skill", "skillHint", "GetTask"):
         assert retired not in source
+
+
+def test_readme_documents_the_complete_optional_member_profile_and_bounds():
+    readme = (ROOT / "README.md").read_text()
+
+    assert "profile:" in readme
+    for field in ("summary:", "capabilities:", "best_for:", "boundaries:", "fallback:"):
+        assert field in readme
+    assert "1,000 characters" in readme
+    assert "20 items" in readme
+    assert "200 characters" in readme

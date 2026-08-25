@@ -95,3 +95,34 @@ def test_v04_database_migrates_without_losing_room_messages_mentions_or_cursor(t
     assert store.mention("mention1")["reply_message_id"] == "m2"
     assert [result["id"] for result in searched] == ["m1"]
     assert store.list_rooms(principal="dennis", status="all")[0]["id"] == "ao"
+
+
+def test_legacy_members_table_migrates_to_persist_optional_profiles(tmp_path):
+    path = tmp_path / "agent-room.db"
+    with sqlite3.connect(path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE rooms (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE members (
+              room_id TEXT NOT NULL REFERENCES rooms(id), principal TEXT NOT NULL, kind TEXT NOT NULL,
+              display_name TEXT NOT NULL, role TEXT NOT NULL, mention_token TEXT NOT NULL, host TEXT NOT NULL,
+              can_post INTEGER NOT NULL, can_mention INTEGER NOT NULL,
+              PRIMARY KEY(room_id, principal), UNIQUE(room_id, mention_token)
+            );
+            INSERT INTO rooms VALUES ('ao', 'Agent Organization', '2026-08-21T20:00:00+00:00');
+            """
+        )
+    profile = {
+        "summary": "General-purpose assistant.",
+        "capabilities": ["Research"],
+        "best_for": ["Synthesis"],
+        "boundaries": ["Read-only by default"],
+        "fallback": "Ask Dennis.",
+    }
+
+    store = RoomStore(path, owner=OWNER, members=[{**HERMES, "profile": profile}])
+
+    hermes = next(member for member in store.members(room_id="ao") if member["principal"] == "hermes")
+    assert hermes["profile"] == profile
+    with sqlite3.connect(path) as conn:
+        assert "profile" in {row[1] for row in conn.execute("PRAGMA table_info(members)")}

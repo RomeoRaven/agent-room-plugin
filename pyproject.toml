@@ -1,6 +1,6 @@
 [project]
 name = "agent-room-plugin"
-version = "0.8.3"
+version = "0.9.0"
 description = "Durable shared-room owner and deterministic peer-client plugin for protoAgent."
 requires-python = ">=3.11"
 license = "MIT"

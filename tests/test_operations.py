@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import sqlite3
+
 import pytest
 
 from operations import RoomOperations
@@ -63,6 +66,25 @@ def test_members_identify_only_configured_dispatch_targets_as_mentionable(tmp_pa
 
     assert members["pc1"]["mentionable"] is True
     assert members["dennis"]["mentionable"] is False
+
+
+def test_room_members_omits_a_persisted_profile_that_is_not_safe_public_contract_data(tmp_path):
+    operations = _service(tmp_path)
+    unsafe = {
+        "summary": "PC1 host",
+        "capabilities": [],
+        "best_for": [],
+        "boundaries": [],
+        "fallback": "Ask Dennis",
+        "secret": "never expose this",
+    }
+    with sqlite3.connect(operations.store.path) as conn:
+        conn.execute("UPDATE members SET profile=? WHERE principal='pc1'", (json.dumps(unsafe),))
+
+    result = operations.execute("room.members", {"room_id": "ao"}, principal="dennis")
+
+    pc1 = next(member for member in result["result"]["members"] if member["principal"] == "pc1")
+    assert "profile" not in pc1
 
 
 def test_remote_target_creates_canonical_pending_mention_without_local_worker_claim(tmp_path):
